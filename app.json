@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "TrueSelf",
+    "slug": "trueself",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "trueself",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#FBF6EE",
+      "resizeMode": "contain",
+      "image": "./assets/splash-icon.png"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "events.gruve.trueself"
+    },
+    "android": {
+      "package": "events.gruve.trueself",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF6EE",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "icon": "./assets/icon.png",
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    }
+  }
+}

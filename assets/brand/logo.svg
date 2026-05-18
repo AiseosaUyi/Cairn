@@ -1,0 +1,37 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    TrueSelf mark — "the companion as a warm presence".
+    A soft seed/teardrop (growth, the life-garden) cradling one calm eye-dot
+    (a presence that notices you). Asymmetric so it feels alive, not a logo
+    template. Honey ground = Career-mode warmth; the leaf-spark is the soul.
+  -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F2A24E"/>
+      <stop offset="1" stop-color="#E8943A"/>
+    </linearGradient>
+    <linearGradient id="seed" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#FFF6EA"/>
+      <stop offset="1" stop-color="#FBE6CC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- warm rounded ground -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#ground)"/>
+
+  <!-- the seed: an asymmetric teardrop leaning into growth -->
+  <path d="M512 196
+           C 660 196 792 330 792 512
+           C 792 706 660 828 512 828
+           C 372 828 256 712 256 556
+           C 256 372 372 196 512 196 Z"
+        fill="url(#seed)"/>
+
+  <!-- the calm presence: one off-center dot that 'notices' -->
+  <circle cx="560" cy="468" r="84" fill="#2A2622"/>
+  <circle cx="588" cy="440" r="26" fill="#FFF6EA"/>
+
+  <!-- the spark of momentum: a single rising stroke (the garden) -->
+  <path d="M392 700 C 440 612 470 560 512 560"
+        stroke="#3FA98A" stroke-width="44" stroke-linecap="round" fill="none"/>
+</svg>
