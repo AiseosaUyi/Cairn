@@ -1,14 +1,14 @@
 /**
- * Voice transcription — calls OUR /api/transcribe proxy.
+ * Voice transcription — POSTs raw audio bytes to /api/transcribe.
  *
- * After the 2026-05-27 security fix: the Whisper API key lives ONLY
- * on the server (process.env.OPENAI_API_KEY in app/api/transcribe+api.ts).
- * The client uploads the raw audio Blob to our endpoint, which forwards
- * to OpenAI server-side.
+ * After the 2026-05-27 wire-protocol simplification: the client sends
+ * the audio Blob directly as the request body (no multipart). The
+ * proxy builds the multipart for Whisper server-side. This sidesteps
+ * Vercel's flaky multipart parsing — which produced opaque HTTP 500s
+ * in two earlier attempts (formData() and bodyParser:false + stream).
  *
- * Web-only for now (uses fetch + FormData with the browser Blob from
- * MediaRecorder). Native (expo-av recording) is a follow-up; the
- * proxy endpoint stays the same.
+ * Web-only for now (uses fetch + the browser Blob from MediaRecorder).
+ * Native (expo-av recording) follows the same wire shape when added.
  */
 
 export interface TranscribeResult {
@@ -22,25 +22,16 @@ function apiBase(): string {
 }
 
 export async function transcribe(audio: Blob): Promise<TranscribeResult> {
-  const fd = new FormData();
-  // Filename is required by Whisper for content-type sniffing; extension
-  // must match the audio mime or Whisper rejects with "Invalid file
-  // format". Browser-recorded webm/opus is the common case.
-  const ext = audio.type.includes('webm') ? 'webm'
-    : audio.type.includes('ogg') ? 'ogg'
-    : audio.type.includes('mp4') ? 'm4a'
-    : audio.type.includes('wav') ? 'wav'
-    : 'webm';
-  // The proxy forwards this multipart unchanged, so all Whisper-required
-  // fields have to be set here on the client.
-  fd.append('file', audio, `voice.${ext}`);
-  fd.append('model', 'whisper-1');
-  fd.append('response_format', 'json');
+  // Content-Type carries the audio mime to the server so it can pick
+  // the right Whisper-compatible filename extension. Default to webm
+  // for browsers that don't set type on MediaRecorder output.
+  const contentType = audio.type || 'audio/webm';
 
   try {
     const res = await fetch(`${apiBase()}/api/transcribe`, {
       method: 'POST',
-      body: fd,
+      headers: { 'Content-Type': contentType },
+      body: audio,
     });
 
     if (!res.ok) {
