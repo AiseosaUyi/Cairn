@@ -45,6 +45,13 @@ export async function completeSafe(
     if (last.stop === 'refusal') {
       return { text: SAFE_DEFERRAL, deferred: true, reason: 'refusal' };
     }
+    // Provider returned an error envelope (e.g. proxy 500, OpenAI 401).
+    // Without this branch the raw error string ("HTTP 500", "OpenAI 401:
+    // Incorrect API key") would land in the companion bubble.
+    if (last.stop === 'error') {
+      if (attempt < maxRetries) continue;
+      return { text: SAFE_DEFERRAL, deferred: true, reason: 'error' };
+    }
     const text = (last.text ?? '').trim();
     if (!text) {
       if (attempt < maxRetries) continue;

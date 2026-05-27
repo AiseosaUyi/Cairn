@@ -1,85 +1,115 @@
 /**
  * /api/transcribe — Whisper proxy as a Vercel Serverless Function.
  *
- * Why this just forwards raw bytes instead of parsing the multipart:
- * `Request.formData()` on Vercel's Node runtime is unreliable for
- * `multipart/form-data` — different runtime/undici versions either fail
- * to parse the boundary, mangle Blob filenames, or throw outright on
- * larger payloads. Symptom is an opaque HTTP 500 in the client.
+ * Uses the Vercel Node.js handler signature (req, res). Forwards the
+ * raw multipart body straight to OpenAI without server-side parsing —
+ * `request.formData()` on Vercel's runtime is unreliable for multipart
+ * payloads. The client appends file + model + response_format itself.
  *
- * Solution: don't parse. The client already builds the FormData with
- * `file`, `model`, and `response_format` fields, so we read the body
- * as bytes, copy the original Content-Type (which carries the boundary
- * string Whisper needs), and stream it straight to OpenAI. Zero
- * multipart code on our side.
+ * Vercel auto-parses JSON bodies but leaves other content-types as
+ * a readable stream on req. We collect that stream into a Buffer and
+ * pass it through to OpenAI with the original Content-Type header
+ * (which carries the multipart boundary).
+ *
+ * `bodyParser: false` would skip Vercel's parsing, but it's only
+ * applied to JSON anyway — for multipart, req is already a raw stream.
  *
  * Key stays server-side (process.env.OPENAI_API_KEY).
  */
 
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
 const ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') {
-    return Response.json({ ok: false, error: 'Method not allowed' }, { status: 405 });
-  }
+// Vercel respects this — keeps the body as a raw stream we can pipe.
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) {
-    return Response.json(
-      { ok: false, error: 'OPENAI_API_KEY is not configured on the server' },
-      { status: 500 },
-    );
-  }
+async function readRawBody(req: VercelRequest): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer | string) => {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
 
-  const contentType = request.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('multipart/form-data')) {
-    return Response.json(
-      { ok: false, error: `Expected multipart/form-data, got: ${contentType || 'none'}` },
-      { status: 400 },
-    );
-  }
-
-  let body: ArrayBuffer;
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    body = await request.arrayBuffer();
-  } catch (e) {
-    return Response.json(
-      { ok: false, error: `Failed to read request body: ${e instanceof Error ? e.message : String(e)}` },
-      { status: 400 },
-    );
-  }
+    if (req.method !== 'POST') {
+      res.status(405).json({ ok: false, error: 'Method not allowed' });
+      return;
+    }
 
-  if (body.byteLength === 0) {
-    return Response.json({ ok: false, error: 'Empty request body' }, { status: 400 });
-  }
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) {
+      console.error('[api/transcribe] OPENAI_API_KEY is missing from server env');
+      res.status(500).json({
+        ok: false,
+        error:
+          'OPENAI_API_KEY is not configured on the server. Set it in Vercel project settings → Environment Variables, then redeploy.',
+      });
+      return;
+    }
 
-  try {
-    const res = await fetch(ENDPOINT, {
+    const contentType = (req.headers['content-type'] || '').toString();
+    if (!contentType.toLowerCase().includes('multipart/form-data')) {
+      res.status(400).json({
+        ok: false,
+        error: `Expected multipart/form-data, got: ${contentType || 'none'}`,
+      });
+      return;
+    }
+
+    let body: Buffer;
+    try {
+      body = await readRawBody(req);
+    } catch (e) {
+      res.status(400).json({
+        ok: false,
+        error: `Failed to read request body: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      return;
+    }
+
+    if (body.byteLength === 0) {
+      res.status(400).json({ ok: false, error: 'Empty request body' });
+      return;
+    }
+
+    const upstream = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${key}`,
         // Forward the original multipart Content-Type unchanged so the
-        // boundary string travels with the body. Don't add charset or
-        // any other parameter — Whisper validates this strictly.
+        // boundary string travels with the body.
         'Content-Type': contentType,
       },
       body,
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      return Response.json(
-        { ok: false, error: `Whisper ${res.status}: ${errText.slice(0, 280)}` },
-        { status: res.status },
+    if (!upstream.ok) {
+      const errText = await upstream.text().catch(() => '');
+      console.error(
+        `[api/transcribe] Whisper ${upstream.status}: ${errText.slice(0, 280)}`,
       );
+      res.status(upstream.status).json({
+        ok: false,
+        error: `Whisper ${upstream.status}: ${errText.slice(0, 280) || 'no body'}`,
+      });
+      return;
     }
 
-    const json = (await res.json()) as { text?: string };
-    return Response.json({ ok: true, text: (json.text ?? '').trim() });
+    const json = (await upstream.json()) as { text?: string };
+    res.status(200).json({ ok: true, text: (json.text ?? '').trim() });
   } catch (e) {
-    return Response.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    console.error(`[api/transcribe] unhandled error: ${msg}`);
+    res.status(500).json({ ok: false, error: msg });
   }
 }
