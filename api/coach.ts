@@ -15,10 +15,10 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { chatJson, type ImagePart, type TextPart } from './_lib/gateway';
-import { cacheKey, memoize, writeCache } from './_lib/cache';
-import { fetchAndStrip, renderPortfolioInSandbox } from './_lib/portfolio';
-import { checkBot } from './_lib/botid';
+import { chatJson, type ImagePart, type TextPart } from '../src/server/gateway';
+import { cacheKey, memoize, writeCache } from '../src/server/cache';
+import { fetchAndStrip, renderPortfolioInSandbox } from '../src/server/portfolio';
+import { checkBot } from '../src/server/botid';
 
 type Mode =
   | 'template'

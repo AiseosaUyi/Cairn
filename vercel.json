@@ -7,9 +7,6 @@
     "api/*.ts": {
       "maxDuration": 60
     },
-    "api/coach.ts": {
-      "maxDuration": 60
-    },
     "api/queues/portfolio-review.ts": {
       "maxDuration": 300,
       "experimentalTriggers": [

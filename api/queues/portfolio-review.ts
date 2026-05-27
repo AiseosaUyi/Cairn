@@ -25,9 +25,9 @@
  */
 
 import { handleCallback } from '@vercel/queue';
-import { writeCache } from '../_lib/cache';
-import { fetchAndStrip, renderPortfolioInSandbox } from '../_lib/portfolio';
-import { chatJson, type ImagePart, type TextPart } from '../_lib/gateway';
+import { writeCache } from '../../src/server/cache';
+import { fetchAndStrip, renderPortfolioInSandbox } from '../../src/server/portfolio';
+import { chatJson, type ImagePart, type TextPart } from '../../src/server/gateway';
 
 interface QueueMessage {
   cacheKey: string;
