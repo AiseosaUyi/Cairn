@@ -12,19 +12,45 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
-import { getProfile } from '@/profile';
+import { getProfile, type Profile } from '@/profile';
+import { supabaseEnabled } from '@/data/supabase';
+import { supabase } from '@/data/supabase';
 import Landing from './landing';
+
+/**
+ * Pick the right next screen for a returning user based on profile state.
+ *
+ * Order matters:
+ *   1. No consent yet → /welcome (3-slide carousel ends at /get-started)
+ *   2. Signed-in but profile-setup not done → /profile-setup
+ *   3. No companion picked → /companion-picker
+ *   4. Otherwise → their last-used mode (defaults to /career)
+ */
+function nextRouteFor(p: Profile, signedIn: boolean): string {
+  if (!p.consentAcceptedAt || !p.ageConfirmed) return '/welcome';
+  if (signedIn && !p.profileSetupComplete) return '/profile-setup';
+  if (!p.companionId) return '/companion-picker?next=/career';
+  return `/${p.lastMode ?? 'career'}`;
+}
 
 export default function Index() {
   const [route, setRoute] = useState<string | null>(null);
 
   useEffect(() => {
     if (Platform.OS === 'web') return; // landing renders, no routing needed
-    getProfile().then((p) => {
-      if (!p.consentAcceptedAt || !p.ageConfirmed) setRoute('/welcome');
-      else if (!p.onboarded || !p.lastMode) setRoute('/onboarding');
-      else setRoute(`/${p.lastMode}`);
-    });
+    (async () => {
+      const p = await getProfile();
+      let signedIn = false;
+      if (supabaseEnabled()) {
+        try {
+          const { data } = await supabase().auth.getSession();
+          signedIn = !!data.session;
+        } catch {
+          /* fall back to guest */
+        }
+      }
+      setRoute(nextRouteFor(p, signedIn));
+    })();
   }, []);
 
   if (Platform.OS === 'web') return <Landing />;

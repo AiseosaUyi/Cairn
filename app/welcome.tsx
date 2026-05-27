@@ -23,14 +23,12 @@ import {
 } from 'react-native';
 import { MotiView } from 'moti';
 import { Easing } from 'react-native-reanimated';
-import { ArrowRight, Check, Sparkles, Compass, Leaf } from 'lucide-react-native';
+import { ArrowRight, Sparkles, Compass, Leaf } from 'lucide-react-native';
 import { ThemeProvider, useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
 import { layout, motion, shadow, space } from '@/design/tokens';
 import { CHARACTERS, avatarUrl } from '@/companion/characters';
 import { CairnMark } from '@/components/CairnMark';
-import { setProfile } from '@/profile';
-import { MIN_AGE } from '@/legal/content';
 
 interface Slide {
   eyebrow: string;
@@ -417,8 +415,6 @@ function Inner() {
   const router = useRouter();
   const { colors } = useTheme();
   const [index, setIndex] = useState(0);
-  const [age, setAge] = useState(false);
-  const [accepted, setAccepted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const { width: winWidth } = Dimensions.get('window');
   const pageWidth = Math.min(winWidth, layout.maxContentWidth);
@@ -435,23 +431,16 @@ function Inner() {
   };
 
   const isLast = index === SLIDES.length - 1;
-  const consentOK = age && accepted;
-  const ctaEnabled = !isLast || consentOK;
 
-  const advance = async () => {
+  // Consent + sign-in path moved to /get-started after the final slide
+  // (per 2026-05-27 onboarding overhaul). Welcome stays pure explanation;
+  // legal acceptance happens on whichever path the user picks next.
+  const advance = () => {
     if (!isLast) {
       go(index + 1);
       return;
     }
-    if (!consentOK) return;
-    // Standard app-onboarding pattern: checkbox-at-signup is the explicit
-    // acceptance signal. Disclaimer text lives in Terms; the user has
-    // affirmed they've read it via the checkbox.
-    await setProfile({
-      ageConfirmed: true,
-      consentAcceptedAt: new Date().toISOString(),
-    });
-    router.replace('/onboarding' as any);
+    router.replace('/get-started' as any);
   };
 
   return (
@@ -476,7 +465,7 @@ function Inner() {
           </Text>
         </View>
         <Pressable
-          onPress={() => router.push('/consent' as any)}
+          onPress={() => router.replace('/get-started' as any)}
           accessibilityRole="button"
           accessibilityLabel="Skip onboarding"
         >
@@ -594,34 +583,10 @@ function Inner() {
           ))}
         </View>
 
-        {isLast && (
-          <MotiView
-            from={{ opacity: 0, translateY: 8 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'timing', duration: motion.duration.medium, easing: Easing.out(Easing.quad) }}
-            style={{ gap: space.sm }}
-          >
-            <CheckboxRow
-              checked={age}
-              onToggle={() => setAge((v) => !v)}
-              label={`I’m at least ${MIN_AGE}.`}
-            />
-            <CheckboxRow
-              checked={accepted}
-              onToggle={() => setAccepted((v) => !v)}
-              label="I accept the Terms and Privacy Policy."
-              onLinkPress={(which) =>
-                router.push(`/legal/${which}` as any)
-              }
-            />
-          </MotiView>
-        )}
-
         <Pressable
           onPress={advance}
           accessibilityRole="button"
           accessibilityLabel={SLIDES[index].cta}
-          accessibilityState={{ disabled: !ctaEnabled }}
           style={{
             backgroundColor: colors.accent,
             paddingVertical: space.md,
@@ -631,10 +596,8 @@ function Inner() {
             justifyContent: 'center',
             gap: space.sm,
             minHeight: 54,
-            opacity: ctaEnabled ? 1 : 0.45,
             ...shadow.raised,
           }}
-          disabled={!ctaEnabled}
         >
           <Text variant="button" color="#FFFFFF">
             {SLIDES[index].cta}
@@ -643,89 +606,10 @@ function Inner() {
         </Pressable>
 
         <Text variant="caption" soft style={{ textAlign: 'center', fontSize: 11 }}>
-          Guest by default · your data stays on this device until you sign in.
+          Sign up, sign in, or continue as a guest on the next step.
         </Text>
       </View>
     </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Inline checkbox row — pairs with the legal acceptance pattern on the
-// final slide. Compact, accessible, no decorative chrome.
-// ---------------------------------------------------------------------------
-function CheckboxRow({
-  checked,
-  onToggle,
-  label,
-  onLinkPress,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-  label: string;
-  onLinkPress?: (which: 'terms' | 'privacy') => void;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-      accessibilityLabel={label}
-      onPress={onToggle}
-      style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' }}
-    >
-      <MotiView
-        animate={{
-          backgroundColor: checked ? colors.ink : 'transparent',
-          borderColor: checked ? colors.ink : colors.hairline,
-        }}
-        transition={{ type: 'timing', duration: motion.duration.short, easing: Easing.out(Easing.quad) }}
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 6,
-          borderWidth: 1.25,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginTop: 1,
-        }}
-      >
-        {checked && <Check size={14} color="#FFFFFF" strokeWidth={2.5} />}
-      </MotiView>
-      {onLinkPress ? (
-        <Text variant="caption" style={{ flex: 1, fontSize: 13, lineHeight: 18 }}>
-          I accept the{' '}
-          <Text
-            variant="caption"
-            color={colors.accent}
-            style={{ fontSize: 13, fontWeight: '600' }}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onLinkPress('terms');
-            }}
-          >
-            Terms
-          </Text>{' '}
-          and{' '}
-          <Text
-            variant="caption"
-            color={colors.accent}
-            style={{ fontSize: 13, fontWeight: '600' }}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onLinkPress('privacy');
-            }}
-          >
-            Privacy Policy
-          </Text>
-          .
-        </Text>
-      ) : (
-        <Text variant="caption" style={{ flex: 1, fontSize: 13, lineHeight: 18 }}>
-          {label}
-        </Text>
-      )}
-    </Pressable>
   );
 }
 

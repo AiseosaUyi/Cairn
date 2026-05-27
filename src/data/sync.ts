@@ -45,11 +45,17 @@ interface ProfileRow {
   experience_level: Profile['experienceLevel'];
   avatar_uri: string | null;
   region: Profile['region'];
+  country: string | null;
+  employment_status: Profile['employmentStatus'];
+  company: string | null;
+  tenure_months: number | null;
+  years_experience: number | null;
   last_mode: Profile['lastMode'];
   coach_names: { career: string | null; health: string | null };
   companion_id: string | null;
   age_confirmed: boolean;
   consent_accepted_at: string | null;
+  profile_setup_complete: boolean;
   onboarded: boolean;
 }
 
@@ -61,11 +67,17 @@ export function rowToProfile(row: ProfileRow): Profile {
     experienceLevel: row.experience_level,
     avatarUri: row.avatar_uri,
     region: row.region ?? 'unknown',
+    country: row.country ?? null,
+    employmentStatus: row.employment_status ?? null,
+    company: row.company ?? null,
+    tenureMonths: row.tenure_months ?? null,
+    yearsExperience: row.years_experience ?? null,
     lastMode: row.last_mode ?? null,
     coachNames: row.coach_names ?? { career: null, health: null },
     companionId: row.companion_id,
     ageConfirmed: row.age_confirmed,
     consentAcceptedAt: row.consent_accepted_at,
+    profileSetupComplete: !!row.profile_setup_complete,
     onboarded: row.onboarded,
   };
 }
@@ -78,11 +90,17 @@ function profileToRow(p: Profile): Omit<ProfileRow, 'id'> {
     experience_level: p.experienceLevel,
     avatar_uri: p.avatarUri,
     region: p.region,
+    country: p.country,
+    employment_status: p.employmentStatus,
+    company: p.company,
+    tenure_months: p.tenureMonths,
+    years_experience: p.yearsExperience,
     last_mode: p.lastMode,
     coach_names: p.coachNames,
     companion_id: p.companionId,
     age_confirmed: p.ageConfirmed,
     consent_accepted_at: p.consentAcceptedAt,
+    profile_setup_complete: p.profileSetupComplete,
     onboarded: p.onboarded,
   };
 }

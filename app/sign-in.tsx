@@ -1,81 +1,85 @@
 /**
- * Sign-in — magic-link flow.
+ * Sign-in — email + password.
  *
- * The user enters an email; Supabase sends a one-time link; clicking
- * the link redirects back to this same page with a `?code=...` query
- * param, which the SDK auto-exchanges for a session (because of the
- * detectSessionInUrl flag in src/data/supabase.ts). The auth-state
- * listener in useAuth then fires; we redirect to /career.
+ * Password-only post 2026-05-27 (was magic-link). After a successful
+ * sign-in the router takes over: if profile_setup_complete is false →
+ * /profile-setup; else if no companionId → /companion-picker; else
+ * /career.
  *
- * The page is fully optional in the product — guest mode is always
- * valid. We only land here from the You-tab "Back up across devices"
- * CTA, or directly via a magic-link redirect.
+ * "Forgot password" routes to /forgot-password which uses Supabase's
+ * resetPasswordForEmail with `siteRoute('/reset-password')` so the
+ * email link points at the public site URL, never localhost.
+ *
+ * The consent checkbox is shown for both first-timers and returning
+ * users — cheap UI, and the timestamp gets refreshed on each successful
+ * sign-in either way.
  */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, TextInput, View } from 'react-native';
-import { ArrowLeft, Check, Mail } from 'lucide-react-native';
+import { Pressable, View } from 'react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import { ThemeProvider, useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
-import { layout, shadow, space } from '@/design/tokens';
+import { layout, space } from '@/design/tokens';
 import { Rise, Screen } from '@/components/ui';
-import { sendMagicLink, useAuth } from '@/auth/useAuth';
-import { supabaseEnabled } from '@/data/supabase';
+import { AuthErrorBanner, AuthField, AuthSubmit, ConsentCheckbox, PasswordField } from '@/components/auth';
+import { signIn, useAuth } from '@/auth/useAuth';
+import { getProfile, setProfile } from '@/profile';
 
 function Inner() {
   const router = useRouter();
   const { colors } = useTheme();
   const { user, loading, enabled } = useAuth();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // If we land here already signed in (e.g. magic-link redirect just
-  // resolved), drop the user into the app.
+  // On successful sign-in, ask the profile what's next.
   useEffect(() => {
-    if (!loading && user) router.replace('/career' as any);
+    if (loading || !user) return;
+    (async () => {
+      const p = await getProfile();
+      if (!p.profileSetupComplete) router.replace('/profile-setup' as any);
+      else if (!p.companionId) router.replace('/companion-picker?next=/career' as any);
+      else router.replace(`/${p.lastMode ?? 'career'}` as any);
+    })();
   }, [loading, user, router]);
 
-  async function onSend() {
-    const e = email.trim();
-    if (!e || !/\S+@\S+\.\S+/.test(e)) {
-      setError('Enter a valid email.');
+  const validate = (): string | null => {
+    if (!/\S+@\S+\.\S+/.test(email)) return 'Enter a valid email.';
+    if (password.length === 0) return 'Enter your password.';
+    if (!consent) return 'Please accept the Terms and confirm your age.';
+    return null;
+  };
+
+  async function onSubmit() {
+    const v = validate();
+    if (v) {
+      setError(v);
       return;
     }
     setBusy(true);
     setError(null);
-    const res = await sendMagicLink(e);
+    const res = await signIn(email, password);
     setBusy(false);
-    if (res.ok) {
-      setSent(true);
-    } else {
-      setError(res.error ?? 'Could not send the email. Try again.');
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
+    // Refresh the local consent stamp — the useEffect above handles
+    // routing once the session arrives.
+    await setProfile({
+      ageConfirmed: true,
+      consentAcceptedAt: new Date().toISOString(),
+    });
   }
 
   if (!enabled) {
     return (
       <Screen tabSafe={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: layout.radius.full,
-              backgroundColor: colors.card,
-              borderColor: colors.hairline,
-              borderWidth: 1,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ArrowLeft size={18} color={colors.ink} strokeWidth={1.75} />
-          </Pressable>
-        </View>
+        <BackBar />
         <Rise>
           <View style={{ gap: 6, marginTop: space.sm }}>
             <Text variant="display" style={{ fontSize: 32 }}>
@@ -83,8 +87,7 @@ function Inner() {
             </Text>
             <Text variant="body" soft style={{ marginTop: 4 }}>
               Cairn works fully without an account — your data is on this device.
-              Sign-in is only needed for cross-device backup, which the operator
-              hasn't enabled on this build yet.
+              The operator hasn't enabled cloud sign-in on this build yet.
             </Text>
           </View>
         </Rise>
@@ -94,33 +97,14 @@ function Inner() {
 
   return (
     <Screen tabSafe={false}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: layout.radius.full,
-            backgroundColor: colors.card,
-            borderColor: colors.hairline,
-            borderWidth: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <ArrowLeft size={18} color={colors.ink} strokeWidth={1.75} />
-        </Pressable>
-      </View>
-
+      <BackBar />
       <Rise>
         <View style={{ gap: 6, marginTop: space.sm }}>
           <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
-            BACK UP ACROSS DEVICES
+            WELCOME BACK
           </Text>
-          <Text variant="display" style={{ fontSize: 38, lineHeight: 42 }}>
-            Sign in with{' '}
+          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 38, lineHeight: 42, color: colors.ink }}>
+            Sign in to your{' '}
             <Text
               style={{
                 fontFamily: 'InstrumentSerif_400Regular_Italic',
@@ -128,138 +112,113 @@ function Inner() {
                 fontSize: 38,
               }}
             >
-              your email.
+              path.
             </Text>
-          </Text>
-          <Text variant="lede" soft style={{ marginTop: 4 }}>
-            No password. We send you a one-tap link. Once you sign in, your goal
-            and profile move from this device to your account — and follow you
-            on any device you sign in from.
           </Text>
         </View>
       </Rise>
 
-      {sent ? (
-        <Rise delay={60}>
-          <View
-            style={{
-              backgroundColor: colors.ink,
-              borderRadius: layout.radius.card,
-              padding: space.lg,
-              gap: space.sm,
-              ...shadow.raised,
-            }}
+      <Rise delay={60}>
+        <View style={{ gap: space.md }}>
+          <AuthField
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+          />
+          <PasswordField
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Your password"
+            autoComplete="current-password"
+            textContentType="password"
+          />
+
+          <View style={{ alignItems: 'flex-end' }}>
+            <Pressable
+              onPress={() => router.push('/forgot-password' as any)}
+              accessibilityRole="button"
+              hitSlop={8}
+            >
+              <Text variant="caption" color={colors.accent} style={{ fontSize: 13, fontWeight: '600' }}>
+                Forgot password?
+              </Text>
+            </Pressable>
+          </View>
+
+          <ConsentCheckbox
+            checked={consent}
+            onToggle={() => setConsent((v) => !v)}
+            onLinkPress={(which) => router.push(`/legal/${which}` as any)}
+          />
+
+          <AuthErrorBanner message={error} />
+
+          <AuthSubmit
+            label="Sign in"
+            loadingLabel="Signing in…"
+            loading={busy}
+            onPress={onSubmit}
+          />
+        </View>
+      </Rise>
+
+      <Rise delay={120}>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 6,
+            paddingVertical: space.md,
+          }}
+        >
+          <Text variant="caption" soft style={{ fontSize: 13 }}>
+            New here?
+          </Text>
+          <Pressable
+            onPress={() => router.replace('/sign-up' as any)}
+            accessibilityRole="button"
+            hitSlop={8}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
-              <Check size={16} color={colors.encourage} strokeWidth={2.25} />
-              <Text
-                variant="caption"
-                color={colors.encourage}
-                style={{ letterSpacing: 0.5, fontWeight: '700', fontSize: 11 }}
-              >
-                LINK SENT
-              </Text>
-            </View>
-            <Text
-              color="#FFFFFF"
-              style={{
-                fontFamily: 'InstrumentSerif_400Regular',
-                fontSize: 24,
-                lineHeight: 28,
-              }}
-            >
-              Check {email}.
+            <Text variant="caption" color={colors.accent} style={{ fontSize: 13, fontWeight: '700' }}>
+              Create an account
             </Text>
-            <Text variant="body" color="rgba(255,255,255,0.7)">
-              Tap the link in the email to finish signing in. You can close this
-              page; you'll land back here automatically.
-            </Text>
-            <Pressable
-              onPress={() => {
-                setSent(false);
-                setEmail('');
-              }}
-              accessibilityRole="button"
-              style={{
-                alignSelf: 'flex-start',
-                marginTop: space.xs,
-                paddingHorizontal: space.md,
-                paddingVertical: space.xs,
-                borderRadius: layout.radius.full,
-                backgroundColor: 'rgba(255,255,255,0.12)',
-              }}
-            >
-              <Text variant="caption" color="#FFFFFF" style={{ fontWeight: '600', fontSize: 12 }}>
-                Use a different email
-              </Text>
-            </Pressable>
-          </View>
-        </Rise>
-      ) : (
-        <Rise delay={60}>
-          <View style={{ gap: space.sm }}>
-            <Text variant="caption" soft style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11 }}>
-              YOUR EMAIL
-            </Text>
-            <TextInput
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                if (error) setError(null);
-              }}
-              placeholder="you@example.com"
-              placeholderTextColor={colors.inkSoft}
-              accessibilityLabel="Email"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-              style={{
-                minHeight: layout.controlHeight,
-                borderRadius: layout.radius.control,
-                borderColor: colors.hairline,
-                borderWidth: 1,
-                paddingHorizontal: space.md,
-                color: colors.ink,
-                fontFamily: 'Inter_400Regular',
-                fontSize: 16,
-                backgroundColor: colors.canvas,
-              }}
-            />
-            {error ? (
-              <Text variant="caption" color={colors.error} style={{ fontSize: 12 }}>
-                {error}
-              </Text>
-            ) : null}
-            <Pressable
-              onPress={onSend}
-              disabled={busy || !email.trim()}
-              accessibilityRole="button"
-              accessibilityLabel="Send magic link"
-              style={{
-                backgroundColor: colors.accent,
-                paddingVertical: space.md,
-                borderRadius: layout.radius.full,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: space.sm,
-                minHeight: 52,
-                opacity: busy || !email.trim() ? 0.45 : 1,
-                ...shadow.raised,
-              }}
-            >
-              <Mail size={16} color="#FFFFFF" strokeWidth={2} />
-              <Text variant="button" color="#FFFFFF">
-                {busy ? 'Sending…' : 'Email me a link'}
-              </Text>
-            </Pressable>
-            <Text variant="caption" soft style={{ textAlign: 'center', fontSize: 11, marginTop: space.xs }}>
-              By signing in you agree to the Terms and Privacy Policy.
-            </Text>
-          </View>
-        </Rise>
-      )}
+          </Pressable>
+        </View>
+      </Rise>
     </Screen>
+  );
+}
+
+function BackBar() {
+  const router = useRouter();
+  const { colors } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <Pressable
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: layout.radius.full,
+          backgroundColor: colors.card,
+          borderColor: colors.hairline,
+          borderWidth: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <ArrowLeft size={18} color={colors.ink} strokeWidth={1.75} />
+      </Pressable>
+    </View>
   );
 }
 

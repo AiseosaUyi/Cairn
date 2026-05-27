@@ -25,6 +25,26 @@ export const EXPERIENCE_LEVELS: { id: ExperienceLevel; label: string; hint: stri
   { id: 'executive', label: 'Executive', hint: 'Director, VP, C-suite' },
 ];
 
+export type EmploymentStatus =
+  | 'full_time'
+  | 'part_time'
+  | 'self_employed'
+  | 'unemployed'
+  | 'student';
+
+export const EMPLOYMENT_STATUSES: { id: EmploymentStatus; label: string }[] = [
+  { id: 'full_time', label: 'Full-time' },
+  { id: 'part_time', label: 'Part-time' },
+  { id: 'self_employed', label: 'Self-employed' },
+  { id: 'unemployed', label: 'Between roles' },
+  { id: 'student', label: 'Student' },
+];
+
+/** True when the status implies a company/employer (and tenure with it). */
+export function employmentHasCompany(s: EmploymentStatus | null): boolean {
+  return s === 'full_time' || s === 'part_time' || s === 'self_employed';
+}
+
 export interface Profile {
   /** Short name / first name — what the companion calls you. */
   name: string | null;
@@ -40,6 +60,17 @@ export interface Profile {
    *  When set, overrides the chosen-companion avatar on profile surfaces. */
   avatarUri: string | null;
   region: 'NG' | 'US' | 'unknown';
+  /** ISO-3166-1 alpha-2 country code, uppercase. Collected in profile-setup. */
+  country: string | null;
+  /** Current employment situation. Conditional fields below apply. */
+  employmentStatus: EmploymentStatus | null;
+  /** Current employer / business name. Only meaningful when
+   *  employmentHasCompany(employmentStatus). */
+  company: string | null;
+  /** How long in the current role, in months. 0 ok ("just started"). */
+  tenureMonths: number | null;
+  /** Total years of professional experience (free input, 0–60). */
+  yearsExperience: number | null;
   lastMode: Mode | null;
   /** Optional, user-chosen companion name per mode. Default: none. */
   coachNames: { career: string | null; health: string | null };
@@ -50,6 +81,10 @@ export interface Profile {
   ageConfirmed: boolean;
   /** ISO timestamp the user accepted Terms + Privacy + not-therapy notice. */
   consentAcceptedAt: string | null;
+  /** Set when the signed-in user finishes the post-sign-up profile-setup
+   *  step. Router uses this to decide whether to land them on /profile-setup
+   *  or straight on /companion-picker. */
+  profileSetupComplete: boolean;
   onboarded: boolean;
 }
 
@@ -61,11 +96,17 @@ const empty: Profile = {
   experienceLevel: null,
   avatarUri: null,
   region: 'unknown',
+  country: null,
+  employmentStatus: null,
+  company: null,
+  tenureMonths: null,
+  yearsExperience: null,
   lastMode: null,
   coachNames: { career: null, health: null },
   companionId: null,
   ageConfirmed: false,
   consentAcceptedAt: null,
+  profileSetupComplete: false,
   onboarded: false,
 };
 
