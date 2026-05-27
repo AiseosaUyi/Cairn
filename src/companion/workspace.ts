@@ -13,7 +13,6 @@
 
 import type { ArtifactExample, ArtifactReview, ArtifactScore } from './artifacts';
 
-const REAL_PROVIDER = (process.env.EXPO_PUBLIC_LLM_PROVIDER ?? 'mock').toLowerCase() === 'openai';
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
 
 interface CoachRequest {
@@ -40,8 +39,14 @@ interface CoachResponse<T> {
   error?: string;
 }
 
+/**
+ * Always try the real server. The earlier gate (`REAL_PROVIDER` env flag)
+ * meant the user had to set BOTH OPENAI_API_KEY on the server AND
+ * EXPO_PUBLIC_LLM_PROVIDER=openai on the build — and forgetting the second
+ * one silently returned mocks even though the server was ready. Now: try,
+ * and only fall back to mock if the server explicitly responds with no key.
+ */
 async function call<T>(req: CoachRequest): Promise<T | null> {
-  if (!REAL_PROVIDER) return null;
   try {
     const res = await fetch(`${API_BASE}/api/coach`, {
       method: 'POST',

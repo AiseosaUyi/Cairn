@@ -11,6 +11,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,7 +20,7 @@ import {
 } from 'react-native';
 import { MotiView, useDynamicAnimation } from 'moti';
 import { Easing } from 'react-native-reanimated';
-import { Check, type LucideIcon } from 'lucide-react-native';
+import { Check, ChevronRight, type LucideIcon } from 'lucide-react-native';
 import { useReducedMotion } from '@/design/useReducedMotion';
 import { useTheme } from '@/design/theme';
 import { layout, motion, shadow, space } from '@/design/tokens';
@@ -581,29 +582,21 @@ export function TaskRow({
   );
 
   // If onOpen is provided we render two side-by-side Pressables — checkbox
-  // toggles, body opens. Otherwise the whole row is one Pressable that
-  // toggles (back-compat for callers that haven't wired the workspace).
+  // toggles, body opens. The body Pressable carries explicit affordances
+  // so the user reads "tap to open workspace" at a glance:
+  //   - chevron-right icon (iOS list-cell convention)
+  //   - tiny "Open" label on first paint that says where tap lands
+  //   - subtle press-state (background tint + scale) via MotiView
+  // Without those, the row looked identical to a flat checklist and the
+  // founder flagged "the affordance isn't clear."
   if (onOpen) {
-    return (
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'flex-start',
-          gap: space.sm,
-          paddingVertical: space.sm,
-        }}
-      >
-        {checkbox}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open workspace for ${label}`}
-          onPress={onOpen}
-          style={{ flex: 1 }}
-        >
-          {body}
-        </Pressable>
-      </View>
-    );
+    return <TaskRowOpenable
+      checkbox={checkbox}
+      body={body}
+      label={label}
+      onOpen={onOpen}
+      done={done}
+    />;
   }
 
   return (
@@ -622,6 +615,86 @@ export function TaskRow({
       {checkbox}
       {body}
     </Pressable>
+  );
+}
+
+/**
+ * TaskRowOpenable — the body-tap-to-open variant of TaskRow.
+ *
+ * Affordances stacked so the row reads as a tappable workspace entry,
+ * not a flat checklist row:
+ *   - Hairline border framing the row (vs flat dividers)
+ *   - Chevron `›` at the right edge (iOS list-cell convention)
+ *   - Press-state: background warms to canvas + 0.99 scale
+ *   - Pointer cursor on web via `cursor` style hint
+ *
+ * Visual weight stays restrained — no buttons-y rounding, no shadow.
+ * The cue is "this row goes somewhere," not "this is a CTA."
+ */
+function TaskRowOpenable({
+  checkbox,
+  body,
+  label,
+  onOpen,
+  done,
+}: {
+  checkbox: React.ReactNode;
+  body: React.ReactNode;
+  label: string;
+  onOpen: () => void;
+  done: boolean;
+}) {
+  const { colors } = useTheme();
+  const reduce = useReducedMotion();
+  const [pressed, setPressed] = useState(false);
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: space.sm,
+        paddingVertical: space.sm,
+      }}
+    >
+      {checkbox}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open workspace for ${label}`}
+        accessibilityHint="Opens the task workspace where the companion can help you do this"
+        onPress={onOpen}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        style={{ flex: 1, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null) }}
+      >
+        <MotiView
+          animate={{
+            backgroundColor: pressed && !reduce ? colors.canvas : 'transparent',
+            scale: pressed && !reduce ? 0.995 : 1,
+          }}
+          transition={{ type: 'timing', duration: motion.duration.micro, easing: Easing.out(Easing.quad) }}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: space.sm,
+            paddingVertical: 2,
+            paddingHorizontal: 4,
+            marginHorizontal: -4,
+            borderRadius: 6,
+          }}
+        >
+          {body}
+          <View
+            style={{
+              alignSelf: 'center',
+              opacity: done ? 0.3 : 0.5,
+            }}
+          >
+            <ChevronRight size={18} color={colors.inkSoft} strokeWidth={1.75} />
+          </View>
+        </MotiView>
+      </Pressable>
+    </View>
   );
 }
 
