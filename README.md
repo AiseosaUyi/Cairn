@@ -1,10 +1,10 @@
-# TrueSelf
+# Cairn
 
 An AI companion that remembers you. Mode-based: **Career** (with Mara) or
 **Health** (with Tomi) — focused experts on one shared engine. The bond is the
 retention lever; it's earned by real coaching substance.
 
-Built from the locked plan in `~/.gstack/projects/TrueSelf/` and `DESIGN.md`.
+Built from the locked plan in `~/.gstack/projects/Cairn/` and `DESIGN.md`.
 
 ## Run it (no credentials needed)
 

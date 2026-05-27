@@ -8,46 +8,54 @@ import { TextInput, View } from 'react-native';
 import { useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
 import { layout, space, type Mode } from '@/design/tokens';
-import { Button, Card, Screen } from '@/components/ui';
+import { Button, Card, Rise, Screen } from '@/components/ui';
+import { MotiView } from 'moti';
+import { Easing } from 'react-native-reanimated';
+import { motion } from '@/design/tokens';
 import { getStore } from '@/memory/store';
 import { newId } from '@/memory/schema';
 import { blendMood, transcriptSentiment } from '@/companion/state';
 
-const FACE = ['😞', '🙁', '😐', '🙂', '😊'];
-
+// Mood pickers are clean numeric squares with a selected-state fill.
+// Emoji faces felt cute; the act of picking is the data, not the icon.
 function Picker({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
   const { colors } = useTheme();
   return (
     <View style={{ gap: space.sm }}>
       <Text variant="label">{label}</Text>
-      <View style={{ flexDirection: 'row', gap: space.sm }}>
+      <View style={{ flexDirection: 'row', gap: space.xs }}>
         {[1, 2, 3, 4, 5].map((n) => {
           const on = value === n;
           return (
-            <View
+            <MotiView
               key={n}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
               accessibilityLabel={`${label} ${n} of 5`}
               onTouchEnd={() => onChange(n)}
+              animate={{ scale: on ? 1 : 0.98 }}
+              transition={{ type: 'timing', duration: motion.duration.short, easing: Easing.out(Easing.quad) }}
               style={{
                 flex: 1,
                 minHeight: layout.controlHeight,
                 borderRadius: layout.radius.control,
                 backgroundColor: on ? colors.accent : colors.card,
-                borderWidth: 1.5,
+                borderWidth: 1,
                 borderColor: on ? colors.accent : colors.hairline,
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
               <Text variant="h3" color={on ? '#FFFFFF' : colors.ink}>
-                {FACE[n - 1]}
+                {n}
               </Text>
-            </View>
+            </MotiView>
           );
         })}
       </View>
+      <Text variant="caption" soft>
+        {label === 'Mood' ? '1 = struggling · 5 = good' : '1 = drained · 5 = full'}
+      </Text>
     </View>
   );
 }
@@ -81,21 +89,27 @@ export default function CheckIn() {
     return (
       <Screen>
         <View style={{ flex: 1, justifyContent: 'center', gap: space.md }}>
-          <Text variant="h2">Got it. Thank you for being honest.</Text>
-          <Text variant="voice" soft>
-            That’s logged and it’s part of your garden now — not a score, just
-            the truth of today. Come back whenever. No streak, nothing owed.
-          </Text>
-          <Button
-            label="Check in again"
-            variant="ghost"
-            onPress={() => {
-              setSaved(false);
-              setMood(3);
-              setEnergy(3);
-              setNote('');
-            }}
-          />
+          <Rise>
+            <Text variant="h2">Got it. Thank you for being honest.</Text>
+          </Rise>
+          <Rise delay={80}>
+            <Text variant="voice" soft>
+              That’s logged and it’s part of your garden now — not a score, just
+              the truth of today. Come back whenever. No streak, nothing owed.
+            </Text>
+          </Rise>
+          <Rise delay={160}>
+            <Button
+              label="Check in again"
+              variant="ghost"
+              onPress={() => {
+                setSaved(false);
+                setMood(3);
+                setEnergy(3);
+                setNote('');
+              }}
+            />
+          </Rise>
         </View>
       </Screen>
     );
@@ -103,40 +117,48 @@ export default function CheckIn() {
 
   return (
     <Screen>
-      <View style={{ gap: space.xs }}>
-        <Text variant="h2">How are you, really?</Text>
-        <Text variant="voice" soft>
-          Not the polite version. Just where you actually are today — that’s
-          enough.
-        </Text>
-      </View>
-      <Card>
-        <Picker label="Mood" value={mood} onChange={setMood} />
-        <Picker label="Energy" value={energy} onChange={setEnergy} />
-      </Card>
-      <View style={{ gap: space.xs }}>
-        <Text variant="label">Want to say anything about today?</Text>
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Optional — a sentence is plenty"
-          placeholderTextColor={colors.inkSoft}
-          accessibilityLabel="Note about today"
-          multiline
-          style={{
-            minHeight: 96,
-            borderWidth: 1.5,
-            borderColor: colors.hairline,
-            borderRadius: layout.radius.control,
-            padding: space.md,
-            color: colors.ink,
-            fontFamily: 'Nunito_500Medium',
-            fontSize: 17,
-            backgroundColor: colors.card,
-          }}
-        />
-      </View>
-      <Button label="Save today" busy={busy} onPress={submit} />
+      <Rise>
+        <View style={{ gap: space.xs }}>
+          <Text variant="h2">How are you, really?</Text>
+          <Text variant="voice" soft>
+            Not the polite version. Just where you actually are today — that’s
+            enough.
+          </Text>
+        </View>
+      </Rise>
+      <Rise delay={60}>
+        <Card>
+          <Picker label="Mood" value={mood} onChange={setMood} />
+          <Picker label="Energy" value={energy} onChange={setEnergy} />
+        </Card>
+      </Rise>
+      <Rise delay={120}>
+        <View style={{ gap: space.xs }}>
+          <Text variant="label">Want to say anything about today?</Text>
+          <TextInput
+            value={note}
+            onChangeText={setNote}
+            placeholder="Optional — a sentence is plenty"
+            placeholderTextColor={colors.inkSoft}
+            accessibilityLabel="Note about today"
+            multiline
+            style={{
+              minHeight: 96,
+              borderWidth: 1,
+              borderColor: colors.hairline,
+              borderRadius: layout.radius.control,
+              padding: space.md,
+              color: colors.ink,
+              fontFamily: 'Inter_400Regular',
+              fontSize: 16,
+              backgroundColor: colors.card,
+            }}
+          />
+        </View>
+      </Rise>
+      <Rise delay={180}>
+        <Button label="Save today" busy={busy} onPress={submit} />
+      </Rise>
     </Screen>
   );
 }

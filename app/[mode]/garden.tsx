@@ -10,7 +10,7 @@ import { View } from 'react-native';
 import { useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
 import { layout, space } from '@/design/tokens';
-import { Card, Screen } from '@/components/ui';
+import { Card, Rise, Screen } from '@/components/ui';
 import { getLifeArc, type LifeArc } from '@/companion/lifearc';
 
 function GardenPath({ series }: { series: number[] }) {
@@ -50,38 +50,56 @@ export default function Garden() {
 
   return (
     <Screen>
-      <Text variant="h2">Our garden</Text>
+      <Rise>
+        <Text variant="h2">Our garden</Text>
+      </Rise>
       {arc?.reframe && (
-        <Card tone="wash">
-          <Text variant="voice">{arc.reframe}</Text>
-        </Card>
+        <Rise delay={60}>
+          <Card tone="wash">
+            <Text variant="voice">{arc.reframe}</Text>
+          </Card>
+        </Rise>
       )}
       {arc && arc.trend.length >= 2 && (
-        <Card>
-          <Text variant="caption" soft>
-            Everything you’ve tended so far
-          </Text>
-          <GardenPath series={arc.trend} />
-        </Card>
+        <Rise delay={120}>
+          <Card>
+            <Text variant="caption" soft>
+              Everything you’ve tended so far
+            </Text>
+            <GardenPath series={arc.trend} />
+          </Card>
+        </Rise>
       )}
       <View style={{ gap: space.lg, marginTop: space.sm }}>
         {arc && arc.moments.length === 0 && (
-          <Text variant="voice" soft>
-            This is where our story grows — the things you said you’d do and
-            did, the hard days you got through. It starts the first time you
-            show up. That’s today. No pressure, no streak. Just us, planting.
-          </Text>
+          <Rise delay={180}>
+            <Text variant="voice" soft>
+              This is where our story grows — the things you said you’d do and
+              did, the hard days you got through. It starts the first time you
+              show up. That’s today. No pressure, no streak. Just us, planting.
+            </Text>
+          </Rise>
         )}
-        {arc?.moments.map((m) => (
-          <View key={m.id} style={{ flexDirection: 'row', gap: space.sm }}>
-            <Text variant="lede">🌱</Text>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text variant="voice">{m.text}</Text>
-              <Text variant="caption" soft>
-                {new Date(m.createdAt).toLocaleDateString()}
-              </Text>
+        {arc?.moments.map((m, i) => (
+          <Rise key={m.id} delay={180 + i * 40}>
+            <View style={{ flexDirection: 'row', gap: space.sm }}>
+              <View
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  marginTop: 10,
+                  backgroundColor: '#3F9A6E',
+                }}
+              />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text variant="voice">{m.text}</Text>
+                <Text variant="caption" soft>
+                  {new Date(m.createdAt).toLocaleDateString()}
+                </Text>
+              </View>
             </View>
-          </View>
+          </Rise>
         ))}
       </View>
     </Screen>

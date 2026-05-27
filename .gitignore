@@ -4,6 +4,9 @@ dist/
 web-build/
 *.log
 .env
+.env.local
+.env.*.local
+.vercel
 .DS_Store
 ios/
 android/
@@ -13,3 +16,4 @@ android/
 
 expo-env.d.ts
 # @end expo-cli
+.gstack/

@@ -22,7 +22,7 @@ function Inner() {
         If you need help now
       </Text>
       <Text variant="voice">
-        TrueSelf is a companion, not an emergency service. If you are in danger
+        Cairn is a companion, not an emergency service. If you are in danger
         or thinking about harming yourself, please reach a person now. You
         deserve real support and it is available.
       </Text>

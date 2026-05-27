@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-TrueSelf is an Expo (SDK 52) + expo-router + TypeScript mobile app: a warm AI
+Cairn is an Expo (SDK 52) + expo-router + TypeScript mobile app: a warm AI
 companion with two modes (Career, Health). It runs end-to-end with **zero
 credentials** via a mock LLM + local SQLite, so it is always demoable.
 
@@ -71,18 +71,44 @@ gate the corresponding features and must stay green.
 
 ## Design hard locks (do not violate without re-review)
 
-- Nunito for UI/body, Fraunces for the companion voice — never system-ui/Inter/Outfit.
+- **Inter** for UI/body/headings, **Instrument Serif** for the companion
+  voice + one display moment per screen — never system-ui, never Fraunces,
+  never Nunito (those read playful, replaced 2026-05-26 per founder direction).
 - Warm light only (no dark; `theme.tsx` is light-locked) — direction is
-  "warm, alive, encouraging": Duolingo's warmth, **never** its streak-guilt /
-  loss-aversion. Progress = the life-garden (tend, never punish).
-- Crisis state = calm in-conversation slate, no motion, never panic-red, never playful.
-- WCAG AA, 44px+ touch targets (controls 54px), low-bandwidth/offline tolerant.
+  **"Mature Consumer — premium editorial sans with single warm accent"**
+  (refs: Apple Family pages, Headspace, Stripe Atlas, Notion marketing).
+  Warmth comes from palette + cadence, not rounded letterforms. **No
+  streak-guilt / loss-aversion** ever — progress = the life-garden (tend,
+  never punish).
+- Crisis state = calm in-conversation slate, **zero motion** (motion sites
+  must check `useReducedMotion()` AND the `frozen` prop), never panic-red,
+  never playful.
+- WCAG AA, 44px+ touch targets (controls 52px), low-bandwidth/offline tolerant.
 - Companion is nameless by default ("your companion"); the name is user-set in
   onboarding/Settings and threaded via `profile.ts` → `playbook.ts` → UI.
+- **Motion** via `moti` (declarative wrapper on `react-native-reanimated`
+  v3) — never `framer-motion` (web-only). Eased curves only (`Easing.out(Easing.quad)`
+  for entries) — no springs anywhere (springs read bouncy).
+- Career-only at launch (CEO plan 2026-05-26): the `app/[mode]/` route is
+  preserved for engine reasons but `health` redirects to `/career` in
+  `app/[mode]/_layout.tsx`. No user-facing Health entry points until the
+  legal/clinical gate clears.
+
+## Gotchas
+
+- **Legal/safety copy is single-source.** All Privacy/Terms/Disclaimer text
+  lives in `src/legal/content.ts`; `app/legal/[doc].tsx` is one dynamic
+  renderer for all three. Edit copy there, never in screens. The consent gate
+  (`app/consent.tsx`) and crisis hotlines (`src/safety/crisis.ts`) also read
+  from these — change once, propagates everywhere.
+- **No CI yet.** `git push` does **not** run tests. Run `bun run typecheck`
+  and `bun run test` locally before pushing; the safety suites are the gate
+  and must stay green.
 
 ## Context
 
+Repo: `origin` → `https://github.com/AiseosaUyi/Cairn` (branch `main`).
 Product/strategy artifacts (office-hours design doc, CEO plan, eng test plan)
-live in `~/.gstack/projects/TrueSelf/`. `LAUNCH.md` is the honest
+live in `~/.gstack/projects/Cairn/`. `LAUNCH.md` is the honest
 store-submission gap list. Two product risks remain open and are not code:
 unproven demand, and no binding kill ceiling.

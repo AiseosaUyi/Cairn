@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "TrueSelf",
-    "slug": "trueself",
+    "name": "Cairn",
+    "slug": "cairn",
     "version": "0.1.0",
     "orientation": "portrait",
-    "scheme": "trueself",
+    "scheme": "cairn",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "backgroundColor": "#FBF6EE",
+      "backgroundColor": "#F8F7F4",
       "resizeMode": "contain",
       "image": "./assets/splash-icon.png"
     },
@@ -17,12 +17,12 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "events.gruve.trueself"
+      "bundleIdentifier": "events.gruve.cairn"
     },
     "android": {
-      "package": "events.gruve.trueself",
+      "package": "events.gruve.cairn",
       "adaptiveIcon": {
-        "backgroundColor": "#FBF6EE",
+        "backgroundColor": "#F8F7F4",
         "foregroundImage": "./assets/adaptive-icon.png"
       }
     },
@@ -38,7 +38,17 @@
     "icon": "./assets/icon.png",
     "web": {
       "favicon": "./assets/favicon.png",
-      "bundler": "metro"
+      "bundler": "metro",
+      "output": "static",
+      "name": "Cairn",
+      "shortName": "Cairn",
+      "description": "Your AI career companion — goal-first, not a chatbot.",
+      "themeColor": "#A24F33",
+      "backgroundColor": "#F8F7F4",
+      "display": "standalone",
+      "orientation": "portrait",
+      "lang": "en",
+      "startUrl": "/"
     }
   }
 }

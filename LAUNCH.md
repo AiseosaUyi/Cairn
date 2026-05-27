@@ -1,4 +1,4 @@
-# Launch readiness — TrueSelf
+# Launch readiness — Cairn
 
 Honest status. The app is **submission-shaped and clear of the common
 auto-rejection traps**. It is not yet *approvable* — store approval needs a

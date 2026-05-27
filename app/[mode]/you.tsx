@@ -1,58 +1,317 @@
 /**
- * "You" tab — the settings hub. Profile, the optional companion name, the
- * deliberate mode switch (mode-as-place — switching lives HERE, not a tab),
- * notifications, legal, data export, account deletion (store-review), help,
- * about. Also the operator safety view (triage + kill switch).
+ * You — settings + career profile hub.
+ *
+ * v3 (2026-05-26): full career profile capture lives here. The agent
+ * uses it to calibrate every reply: full name (for portfolio outputs,
+ * intro emails), current role + experience level (calibrates seniority
+ * of advice), avatar (personalizes surfaces). Plus the existing
+ * companion picker entry, notifications, legal, data export, and account
+ * deletion.
+ *
+ * Crisis-help surface is gone (Career-only product per CEO plan
+ * 2026-05-26). The /help route still exists as a generic Help & Support
+ * page (FAQ + email contact).
  */
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Platform, Share, TextInput, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, Share, TextInput, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useLocalSearchParams } from 'expo-router';
+import { ChevronRight, ImagePlus, Mail, Trash2 } from 'lucide-react-native';
 import { useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
-import { layout, space, type Mode } from '@/design/tokens';
-import { Button, Card, Screen } from '@/components/ui';
+import { layout, motion, shadow, space, type Mode } from '@/design/tokens';
+import { MotiView } from 'moti';
+import { Easing } from 'react-native-reanimated';
+import { Button, Card, Mascot, Rise, Screen } from '@/components/ui';
 import {
+  EXPERIENCE_LEVELS,
   getProfile,
   setProfile,
   wipeProfile,
+  type ExperienceLevel,
   type Profile,
 } from '@/profile';
 import { getStore } from '@/memory/store';
-import { healthDomainAvailable } from '@/safety/healthGuardrails';
-import { Safety } from '@/safety/observability';
+import { findCharacter } from '@/companion/characters';
+import { CONTACT_EMAIL } from '@/legal/content';
+
+const ROLE_SUGGESTIONS = [
+  'Product Manager',
+  'Software Engineer',
+  'Designer',
+  'Marketing',
+  'Sales',
+  'Operations',
+  'Founder',
+  'Consultant',
+  'Recruiter',
+  'Career switcher',
+];
+
+// ---------------------------------------------------------------------------
+// Avatar — user photo > chosen companion portrait > default mascot.
+// On web, tapping the upload button opens a file picker and stores a
+// data-URL into profile.avatarUri. Native upload (expo-image-picker) is
+// a follow-up.
+// ---------------------------------------------------------------------------
+function AvatarPicker({
+  profile,
+  onChange,
+}: {
+  profile: Profile;
+  onChange: (uri: string | null) => void;
+}) {
+  const { colors } = useTheme();
+  const character = findCharacter(profile.companionId);
+
+  const openPicker = () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert(
+        'Photo upload',
+        'Native image picker wiring is a follow-up; on web you can upload directly.',
+      );
+      return;
+    }
+    if (typeof document === 'undefined') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === 'string') onChange(result);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      <Pressable
+        onPress={openPicker}
+        accessibilityRole="button"
+        accessibilityLabel="Change profile photo"
+        style={{
+          width: 80,
+          height: 80,
+          borderRadius: layout.radius.full,
+          overflow: 'hidden',
+          backgroundColor: '#F1E5D6',
+          borderColor: colors.hairline,
+          borderWidth: 1,
+        }}
+      >
+        {profile.avatarUri ? (
+          <Image
+            source={{ uri: profile.avatarUri }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+            accessibilityLabel="Your photo"
+          />
+        ) : (
+          <Mascot
+            name={profile.coachNames[(profile.lastMode ?? 'career') as Mode] ?? null}
+            character={character}
+            size={80}
+          />
+        )}
+      </Pressable>
+      <View style={{ flex: 1, gap: 4 }}>
+        <Pressable
+          onPress={openPicker}
+          accessibilityRole="button"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.xs,
+            paddingHorizontal: space.md,
+            paddingVertical: space.xs,
+            borderRadius: layout.radius.full,
+            borderColor: colors.hairline,
+            borderWidth: 1,
+            alignSelf: 'flex-start',
+          }}
+        >
+          <ImagePlus size={14} color={colors.ink} strokeWidth={1.75} />
+          <Text variant="caption" style={{ fontWeight: '600', fontSize: 12 }}>
+            {profile.avatarUri ? 'Change photo' : 'Upload photo'}
+          </Text>
+        </Pressable>
+        {profile.avatarUri && (
+          <Pressable
+            onPress={() => onChange(null)}
+            accessibilityRole="button"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.xs,
+              paddingHorizontal: space.md,
+              paddingVertical: space.xs,
+              alignSelf: 'flex-start',
+            }}
+          >
+            <Trash2 size={12} color={colors.inkSoft} strokeWidth={1.75} />
+            <Text variant="caption" soft style={{ fontSize: 11 }}>
+              Remove
+            </Text>
+          </Pressable>
+        )}
+        <Text variant="caption" soft style={{ fontSize: 11 }}>
+          PNG, JPG, or HEIC. Stays on this device.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  hint?: string;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text variant="caption" soft style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11 }}>
+        {label.toUpperCase()}
+      </Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={colors.inkSoft}
+        accessibilityLabel={label}
+        style={{
+          minHeight: layout.controlHeight,
+          borderWidth: 1,
+          borderColor: colors.hairline,
+          borderRadius: layout.radius.control,
+          paddingHorizontal: space.md,
+          color: colors.ink,
+          fontFamily: 'Inter_400Regular',
+          fontSize: 16,
+          backgroundColor: colors.canvas,
+        }}
+      />
+      {hint ? (
+        <Text variant="caption" soft style={{ fontSize: 11 }}>
+          {hint}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function ExperienceChips({
+  value,
+  onChange,
+}: {
+  value: ExperienceLevel | null;
+  onChange: (v: ExperienceLevel) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text variant="caption" soft style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11 }}>
+        EXPERIENCE LEVEL
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
+        {EXPERIENCE_LEVELS.map((lvl) => {
+          const on = value === lvl.id;
+          return (
+            <Pressable
+              key={lvl.id}
+              onPress={() => onChange(lvl.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              style={{
+                paddingHorizontal: space.md,
+                paddingVertical: space.xs,
+                borderRadius: layout.radius.full,
+                backgroundColor: on ? colors.ink : 'transparent',
+                borderColor: on ? colors.ink : colors.hairline,
+                borderWidth: 1,
+              }}
+            >
+              <View style={{ alignItems: 'center' }}>
+                <Text
+                  variant="caption"
+                  color={on ? '#FFFFFF' : colors.ink}
+                  style={{ fontWeight: '600', letterSpacing: 0.3, fontSize: 12 }}
+                >
+                  {lvl.label}
+                </Text>
+                <Text
+                  variant="caption"
+                  color={on ? 'rgba(255,255,255,0.65)' : colors.inkSoft}
+                  style={{ fontSize: 10, marginTop: 1 }}
+                >
+                  {lvl.hint}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 export default function You() {
   const { mode } = useLocalSearchParams<{ mode: Mode }>();
   const router = useRouter();
   const { colors } = useTheme();
-  const other: Mode = mode === 'career' ? 'health' : 'career';
   const [p, setP] = useState<Profile | null>(null);
+  const [fullName, setFullName] = useState('');
+  const [shortName, setShortName] = useState('');
+  const [role, setRole] = useState('');
+  const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel | null>(null);
   const [coach, setCoach] = useState('');
   const [notify, setNotify] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       getProfile().then((pr) => {
         setP(pr);
+        setFullName(pr.fullName ?? '');
+        setShortName(pr.name ?? '');
+        setRole(pr.role ?? '');
+        setExperienceLevel(pr.experienceLevel);
         setCoach(pr.coachNames[mode] ?? '');
       });
     }, [mode]),
   );
 
-  async function saveCoach() {
-    const c = coach.trim() || null;
+  async function saveProfile() {
     const next = await setProfile({
-      coachNames: { ...(p?.coachNames ?? { career: null, health: null }), [mode]: c },
+      fullName: fullName.trim() || null,
+      name: shortName.trim() || null,
+      role: role.trim() || null,
+      experienceLevel,
+      coachNames: { ...(p?.coachNames ?? { career: null, health: null }), [mode]: coach.trim() || null },
     });
     setP(next);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1600);
   }
 
-  async function switchMode() {
-    if (other === 'health' && !healthDomainAvailable().ok) return;
-    await setProfile({ lastMode: other });
-    router.replace(`/${other}` as any);
+  async function saveAvatar(uri: string | null) {
+    const next = await setProfile({ avatarUri: uri });
+    setP(next);
   }
 
   async function exportData() {
@@ -79,7 +338,7 @@ export default function You() {
     }
     Alert.alert(
       'Delete everything?',
-      'This permanently erases your profile, conversations, check-ins, and garden. It cannot be undone.',
+      'This permanently erases your profile, conversations, goals, and path. It cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete forever', style: 'destructive', onPress: doWipe },
@@ -87,119 +346,222 @@ export default function You() {
     );
   }
 
-  const otherOk = other === 'health' ? healthDomainAvailable() : { ok: true };
-  const triage = Safety.triageQueue();
   const version = Constants.expoConfig?.version ?? '0.1.0';
+  const companion = findCharacter(p?.companionId ?? null);
 
   return (
     <Screen>
-      <Text variant="h2">You</Text>
-
-      <Card>
-        <Text variant="h3">Your companion</Text>
-        <Text variant="body" soft>
-          Default is just “your companion.” Name it if you want — yours to
-          change anytime.
-        </Text>
-        <TextInput
-          value={coach}
-          onChangeText={setCoach}
-          placeholder="Companion name (optional)"
-          placeholderTextColor={colors.inkSoft}
-          accessibilityLabel="Companion name"
-          style={{
-            minHeight: layout.controlHeight,
-            borderWidth: 1.5,
-            borderColor: colors.hairline,
-            borderRadius: layout.radius.control,
-            paddingHorizontal: space.md,
-            color: colors.ink,
-            fontFamily: 'Nunito_500Medium',
-            fontSize: 17,
-            backgroundColor: colors.canvas,
-          }}
-        />
-        <Button label="Save name" variant="soft" onPress={saveCoach} />
-      </Card>
-
-      <Card>
-        <Text variant="h3">Switch world</Text>
-        <Text variant="body" soft>
-          You’re in {mode}. Switching is deliberate — one focused companion at
-          a time.
-        </Text>
-        <Button
-          label={otherOk.ok ? `Go to ${other}` : `${other} is opening soon`}
-          disabled={!otherOk.ok}
-          onPress={switchMode}
-        />
-      </Card>
-
-      <Card>
-        <Text variant="h3">Notifications</Text>
-        <Text variant="body" soft>
-          Gentle daily check-ins. {notify ? 'On' : 'Off'} — never guilt, you
-          can always turn this off.
-        </Text>
-        <Button
-          label={notify ? 'Turn off check-ins' : 'Turn on gentle check-ins'}
-          variant="ghost"
-          onPress={() => setNotify((v) => !v)}
-        />
-        <Text variant="caption" soft>
-          Push delivery activates with the hosted backend; this preference is
-          saved meanwhile.
-        </Text>
-      </Card>
-
-      <Card>
-        <Text variant="h3">Safety & support</Text>
-        <Button
-          label="Get help now"
-          onPress={() => router.push('/help' as any)}
-        />
-        <Text variant="caption" soft>
-          Operator view · {triage.length} flagged moment(s) for human review.
-        </Text>
-        <Button
-          label={Safety.isKilled(mode) ? `Re-enable ${mode}` : `Pause ${mode} (kill switch)`}
-          variant="ghost"
-          onPress={() => {
-            Safety.isKilled(mode) ? Safety.revive(mode) : Safety.kill(mode);
-            setP((x) => (x ? { ...x } : x));
-          }}
-        />
-      </Card>
-
-      <Card>
-        <Text variant="h3">Legal</Text>
-        {(['privacy', 'terms', 'disclaimer'] as const).map((d) => (
-          <Text
-            key={d}
-            variant="body"
-            color={colors.accent}
-            onPress={() => router.push(`/legal/${d}` as any)}
-            style={{ paddingVertical: space.xs }}
-          >
-            {d === 'privacy' ? 'Privacy Policy' : d === 'terms' ? 'Terms of Use' : 'What TrueSelf is and isn’t'}
+      <Rise>
+        <View style={{ gap: 6 }}>
+          <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+            SETTINGS
           </Text>
-        ))}
-      </Card>
+          <Text variant="display" style={{ fontSize: 40, lineHeight: 44 }}>
+            You
+          </Text>
+        </View>
+      </Rise>
 
-      <Card>
-        <Text variant="h3">Your data</Text>
-        <Button label="Export my data" variant="soft" onPress={exportData} />
-        <Button label="Delete account & all data" variant="ghost" onPress={deleteAccount} />
-        <Text variant="caption" soft>
-          Deletion is permanent and immediate.
-        </Text>
-      </Card>
+      {/* Profile — the career-context capture the agent uses to
+          calibrate every reply. */}
+      <Rise delay={60}>
+        <Card style={{ gap: space.md }}>
+          <Text variant="h3" style={{ fontSize: 20 }}>
+            Your profile
+          </Text>
+          <Text variant="caption" soft>
+            What your companion knows about you. Everything stays on this
+            device until you sign in.
+          </Text>
 
-      <Text variant="caption" soft style={{ textAlign: 'center' }}>
-        TrueSelf v{version} · made with care · {''}
-        a companion, not a clinician
+          {p && <AvatarPicker profile={p} onChange={saveAvatar} />}
+
+          <LabeledInput
+            label="Full name"
+            value={fullName}
+            onChange={setFullName}
+            placeholder="Used on CV drafts and intro emails"
+          />
+          <LabeledInput
+            label="What to call you"
+            value={shortName}
+            onChange={setShortName}
+            placeholder="First name or a nickname"
+            hint="What your companion says in conversation."
+          />
+          <LabeledInput
+            label="Current role"
+            value={role}
+            onChange={setRole}
+            placeholder={ROLE_SUGGESTIONS[0]}
+            hint={`e.g. ${ROLE_SUGGESTIONS.slice(0, 5).join(' · ')}`}
+          />
+          <ExperienceChips value={experienceLevel} onChange={setExperienceLevel} />
+
+          <LabeledInput
+            label="Companion nickname (optional)"
+            value={coach}
+            onChange={setCoach}
+            placeholder="Default uses the picked companion's name"
+          />
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <View style={{ flex: 1 }}>
+              <Button label={savedFlash ? 'Saved ✓' : 'Save profile'} onPress={saveProfile} />
+            </View>
+            {savedFlash && (
+              <MotiView
+                from={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: 'timing', duration: motion.duration.short, easing: Easing.out(Easing.quad) }}
+              />
+            )}
+          </View>
+        </Card>
+      </Rise>
+
+      {/* Companion picker entry */}
+      <Rise delay={120}>
+        <Pressable
+          onPress={() => router.push('/companion-picker' as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Change your AI companion"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.sm,
+            padding: space.md,
+            borderRadius: layout.radius.card,
+            backgroundColor: colors.card,
+            borderColor: colors.hairline,
+            borderWidth: 1,
+          }}
+        >
+          <Mascot
+            name={p?.coachNames[mode] ?? null}
+            character={companion}
+            size={44}
+          />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="body" style={{ fontWeight: '600' }}>
+              Your AI companion
+            </Text>
+            <Text variant="caption" soft>
+              {companion ? `${companion.name} · ${companion.role}` : 'No companion selected yet'}
+            </Text>
+          </View>
+          <ChevronRight size={18} color={colors.inkSoft} strokeWidth={1.75} />
+        </Pressable>
+      </Rise>
+
+      {/* Notifications */}
+      <Rise delay={180}>
+        <Card>
+          <Text variant="h3" style={{ fontSize: 20 }}>
+            Notifications
+          </Text>
+          <Text variant="body" soft>
+            Gentle daily check-ins. {notify ? 'On' : 'Off'} — never guilt, you
+            can always turn this off.
+          </Text>
+          <Button
+            label={notify ? 'Turn off check-ins' : 'Turn on gentle check-ins'}
+            variant="ghost"
+            onPress={() => setNotify((v) => !v)}
+          />
+          <Text variant="caption" soft>
+            Push delivery activates with the hosted backend; this preference is
+            saved meanwhile.
+          </Text>
+        </Card>
+      </Rise>
+
+      {/* Help & support */}
+      <Rise delay={240}>
+        <Pressable
+          onPress={() => router.push('/help' as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Help and support"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.sm,
+            padding: space.md,
+            borderRadius: layout.radius.card,
+            backgroundColor: colors.card,
+            borderColor: colors.hairline,
+            borderWidth: 1,
+          }}
+        >
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: layout.radius.full,
+              backgroundColor: colors.canvas,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Mail size={18} color={colors.ink} strokeWidth={1.75} />
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="body" style={{ fontWeight: '600' }}>
+              Help & support
+            </Text>
+            <Text variant="caption" soft>
+              FAQ · email us at {CONTACT_EMAIL}
+            </Text>
+          </View>
+          <ChevronRight size={18} color={colors.inkSoft} strokeWidth={1.75} />
+        </Pressable>
+      </Rise>
+
+      {/* Legal */}
+      <Rise delay={300}>
+        <Card>
+          <Text variant="h3" style={{ fontSize: 20 }}>
+            Legal
+          </Text>
+          {(['privacy', 'terms'] as const).map((d) => (
+            <Pressable
+              key={d}
+              onPress={() => router.push(`/legal/${d}` as any)}
+              accessibilityRole="link"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingVertical: space.xs,
+              }}
+            >
+              <Text variant="body" color={colors.ink} style={{ fontWeight: '500' }}>
+                {d === 'privacy' ? 'Privacy Policy' : 'Terms of Use'}
+              </Text>
+              <ChevronRight size={16} color={colors.inkSoft} strokeWidth={1.75} />
+            </Pressable>
+          ))}
+        </Card>
+      </Rise>
+
+      {/* Data */}
+      <Rise delay={360}>
+        <Card>
+          <Text variant="h3" style={{ fontSize: 20 }}>
+            Your data
+          </Text>
+          <Button label="Export my data" variant="soft" onPress={exportData} />
+          <Button label="Delete account & all data" variant="ghost" onPress={deleteAccount} />
+          <Text variant="caption" soft>
+            Deletion is permanent and immediate.
+          </Text>
+        </Card>
+      </Rise>
+
+      <Text variant="caption" soft style={{ textAlign: 'center', marginTop: space.md }}>
+        Cairn v{version} · made with care
       </Text>
-      <View style={{ height: space.xl }} />
+      <View style={{ height: space.lg }} />
     </Screen>
   );
 }

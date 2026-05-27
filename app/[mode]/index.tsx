@@ -1,222 +1,438 @@
 /**
- * Companion tab ("You & me") — home. Warm and alive: the companion has a
- * presence and reaches out first. Nameless by default ("your companion")
- * until the user names it in You. Crisis stays calm and chromeless. Help is
- * always one tap away from the header (store-review + ethics).
+ * Today — the home tab. Goal-first dashboard. Shows:
+ *   - Today's date + tasks from your active path
+ *   - The active goal at a glance (title, phase, progress)
+ *   - One-tap to drill into the full path
+ *   - Quick capture for a custom task
+ *
+ * The chat is no longer the home; it's its own tab. The user lives in
+ * tasks and progress; chat is a thing they open when they need to think.
  */
-import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { Pressable, View } from 'react-native';
+import { ArrowRight, ArrowUpRight, MessageCircle, Plus, Sparkles } from 'lucide-react-native';
 import { useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
-import { layout, space, type Mode } from '@/design/tokens';
+import { layout, shadow, space } from '@/design/tokens';
 import {
-  Button,
-  CompanionBubble,
-  CrisisInline,
-  EncouragementChip,
-  Mascot,
+  Card,
+  Chip,
+  Icon,
+  ProgressBar,
+  Rise,
   Screen,
+  TaskRow,
 } from '@/components/ui';
-import { coachLabel, getProfile, resolveCoachName, setProfile } from '@/profile';
-import { evaluateRitual, openingHint } from '@/companion/ritual';
-import { runTurn } from '@/companion/turn';
-import { addCommitment } from '@/companion/coaching';
-import { hotlinesFor, crisisExposureAllowed } from '@/safety/crisis';
-import { healthDomainAvailable } from '@/safety/healthGuardrails';
+import {
+  getActiveGoal,
+  progress,
+  setTaskStatus,
+  todaysTasks,
+  type Goal,
+} from '@/companion/goals';
+import { getProfile } from '@/profile';
+import { findCharacter, type Character } from '@/companion/characters';
 
-interface Line {
-  who: 'companion' | 'you';
-  text: string;
-  crisis?: string | null;
+function GoalCard({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
+  const { colors } = useTheme();
+  const p = progress(goal);
+  const current = goal.phases.find((ph) => ph.status === 'in_progress') ?? goal.phases[0];
+  const phaseIdx = goal.phases.findIndex((ph) => ph.id === current?.id) + 1;
+  return (
+    <Pressable
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`Open goal: ${goal.title}`}
+      style={{
+        backgroundColor: colors.ink,
+        borderRadius: layout.radius.card,
+        padding: space.lg,
+        gap: space.md,
+        ...shadow.raised,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Text variant="caption" color={colors.accent} style={{ letterSpacing: 0.6, fontWeight: '600', textTransform: 'uppercase', fontSize: 11 }}>
+            Active goal
+          </Text>
+          <Text
+            variant="h3"
+            color="#FFFFFF"
+            style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 24, letterSpacing: -0.2 }}
+          >
+            {goal.title}
+          </Text>
+        </View>
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: layout.radius.full,
+            backgroundColor: 'rgba(255,255,255,0.12)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ArrowUpRight size={16} color="#FFFFFF" strokeWidth={2} />
+        </View>
+      </View>
+
+      <View style={{ gap: space.xs }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text variant="caption" color="rgba(255,255,255,0.65)">
+            Phase {phaseIdx} of {goal.phases.length} · {current?.title}
+          </Text>
+          <Text variant="caption" color="#FFFFFF" style={{ fontWeight: '600' }}>
+            {p.pct}%
+          </Text>
+        </View>
+        <ProgressBar value={p.pct} color={colors.accent} height={5} />
+        <Text variant="caption" color="rgba(255,255,255,0.5)" style={{ marginTop: 2 }}>
+          {p.done} of {p.total} tasks · {goal.horizon}
+        </Text>
+      </View>
+    </Pressable>
+  );
 }
 
-export default function Companion() {
-  const { mode } = useLocalSearchParams<{ mode: Mode }>();
-  const { colors } = useTheme();
+export default function Today() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof todaysTasks>>>([]);
+  const [companion, setCompanion] = useState<Character | null>(null);
+  const [tick, setTick] = useState(0);
 
-  const [lines, setLines] = useState<Line[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [coachName, setCoachName] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState('your companion');
-  const [praise, setPraise] = useState<string | null>(null);
-  const userName = useRef<string | null>(null);
-  const region = useRef<'NG' | 'US' | 'unknown'>('unknown');
-  const started = useRef(false);
-
-  const healthBlocked = mode === 'health' && !healthDomainAvailable().ok;
-
-  const say = useCallback(
-    async (userText: string) => {
-      setBusy(true);
-      setLines((l) => [...l, { who: 'you', text: userText }]);
-      const res = await runTurn(mode, userText, userName.current);
-      setLines((l) => [...l, { who: 'companion', text: res.reply, crisis: res.crisisInline }]);
-      setBusy(false);
-    },
-    [mode],
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        setGoal(await getActiveGoal());
+        setItems(await todaysTasks());
+        const p = await getProfile();
+        setCompanion(findCharacter(p.companionId));
+      })();
+    }, [tick]),
   );
 
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    (async () => {
-      await setProfile({ lastMode: mode });
-      const p = await getProfile();
-      userName.current = p.name;
-      region.current = p.region;
-      setCoachName(resolveCoachName(p, mode));
-      setDisplayName(coachLabel(p, mode));
-      if (healthBlocked) return;
-      const decision = await evaluateRitual(mode);
-      if (decision.fire) {
-        setBusy(true);
-        const res = await runTurn(mode, openingHint(decision.posture), p.name);
-        setLines([{ who: 'companion', text: res.reply, crisis: res.crisisInline }]);
-        setBusy(false);
-      } else {
-        setLines([
-          {
-            who: 'companion',
-            text:
-              decision.posture === 'waiting'
-                ? "I'm here whenever you want me. No streak to keep, nothing owed — just glad you're back."
-                : 'Good to see you again.',
-          },
-        ]);
-      }
-    })();
-  }, [mode, healthBlocked]);
+  const today = new Date();
+  const dateLabel = today
+    .toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    .toUpperCase();
 
-  if (healthBlocked) {
+  // ------------------------------------------------------------------
+  // First-time user — no goal yet. Show the walkthrough invitation
+  // instead of any pre-baked mock content.
+  // ------------------------------------------------------------------
+  if (!goal) {
+    const companionName = companion?.name ?? 'your companion';
     return (
       <Screen>
-        <Text variant="h2">Health is opening soon</Text>
-        <Text variant="voice" soft>
-          {healthDomainAvailable().notice}
-        </Text>
-        <Button label="Back to Career" onPress={() => router.replace('/career' as any)} />
+        <Rise>
+          <View style={{ gap: 6 }}>
+            <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+              {dateLabel}
+            </Text>
+            <Text variant="display" style={{ fontSize: 40, lineHeight: 44 }}>
+              Today
+            </Text>
+          </View>
+        </Rise>
+
+        <Rise delay={60}>
+          <View
+            style={{
+              backgroundColor: colors.ink,
+              borderRadius: layout.radius.card,
+              padding: space.lg,
+              gap: space.md,
+              ...shadow.raised,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
+              <Sparkles size={14} color={colors.accent} strokeWidth={2} />
+              <Text
+                variant="caption"
+                color={colors.accent}
+                style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}
+              >
+                LET'S START
+              </Text>
+            </View>
+            <Text
+              color="#FFFFFF"
+              style={{
+                fontFamily: 'InstrumentSerif_400Regular',
+                fontSize: 30,
+                lineHeight: 34,
+                letterSpacing: -0.4,
+              }}
+            >
+              What are you trying to{' '}
+              <Text
+                style={{
+                  fontFamily: 'InstrumentSerif_400Regular_Italic',
+                  color: colors.accent,
+                  fontSize: 30,
+                  letterSpacing: -0.4,
+                }}
+              >
+                achieve?
+              </Text>
+            </Text>
+            <Text variant="body" color="rgba(255,255,255,0.7)">
+              Tell {companionName} what you want — a transition, a
+              promotion, an offer — and they'll build you a path with
+              weekly phases and daily tasks. Dynamic to your goal, not
+              generic advice.
+            </Text>
+
+            <Pressable
+              onPress={() => router.push('/career/setup' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Set up your goal"
+              style={{
+                marginTop: space.xs,
+                backgroundColor: colors.accent,
+                borderRadius: layout.radius.full,
+                paddingVertical: space.md,
+                paddingHorizontal: space.lg,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: space.sm,
+                minHeight: 52,
+              }}
+            >
+              <Text variant="button" color="#FFFFFF">
+                Set up my goal
+              </Text>
+              <ArrowRight size={16} color="#FFFFFF" strokeWidth={2.25} />
+            </Pressable>
+          </View>
+        </Rise>
+
+        <Rise delay={120}>
+          <Pressable
+            onPress={() => router.push('/career/chat?preset=clarity' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Talk it through first"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.sm,
+              padding: space.md,
+              borderRadius: layout.radius.card,
+              backgroundColor: colors.card,
+              borderColor: colors.hairline,
+              borderWidth: 1,
+            }}
+          >
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: layout.radius.full,
+                backgroundColor: colors.canvas,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MessageCircle size={18} color={colors.ink} strokeWidth={1.75} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text variant="body" style={{ fontWeight: '600' }}>
+                Not sure yet? Let's talk it through.
+              </Text>
+              <Text variant="caption" soft>
+                {companionName} can help you figure out what's next.
+              </Text>
+            </View>
+            <ArrowRight size={14} color={colors.inkSoft} strokeWidth={1.75} />
+          </Pressable>
+        </Rise>
+
+        <Rise delay={180}>
+          <View style={{ gap: space.xs, marginTop: space.sm }}>
+            <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+              WHAT YOU'LL GET
+            </Text>
+            {[
+              { glyph: Sparkles, t: 'A path tailored to your goal' },
+              { glyph: ArrowUpRight, t: 'Weekly phases, daily tasks' },
+              { glyph: MessageCircle, t: 'Chat to adjust or rethink anything' },
+            ].map((row) => (
+              <View
+                key={row.t}
+                style={{
+                  flexDirection: 'row',
+                  gap: space.sm,
+                  alignItems: 'center',
+                  paddingVertical: space.xs,
+                }}
+              >
+                <Icon glyph={row.glyph} soft size={16} />
+                <Text variant="body" soft>
+                  {row.t}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Rise>
       </Screen>
     );
   }
 
   return (
     <Screen>
-      <View
-        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-      >
-        <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-          <Mascot name={coachName} />
-          <View>
-            <Text variant="h3">{coachName ?? 'Your companion'}</Text>
+      <Rise>
+        <View style={{ gap: 6 }}>
+          <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+            {dateLabel}
+          </Text>
+          <Text variant="display" style={{ fontSize: 40, lineHeight: 44 }}>
+            Today
+          </Text>
+        </View>
+      </Rise>
+
+      <Rise delay={60}>
+        <GoalCard goal={goal} onOpen={() => router.navigate('/career/goals' as any)} />
+      </Rise>
+
+      <Rise delay={120}>
+        <View style={{ gap: space.sm }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+              ON YOUR PATH · TODAY
+            </Text>
             <Text variant="caption" soft>
-              {mode === 'career' ? 'career' : 'health'} · here with you
+              {items.length} {items.length === 1 ? 'task' : 'tasks'}
             </Text>
           </View>
+
+          <Card style={{ padding: 0, paddingVertical: space.xs, paddingHorizontal: space.lg }}>
+            {items.length === 0 ? (
+              <View style={{ paddingVertical: space.lg, alignItems: 'center', gap: space.xs }}>
+                <Icon glyph={Sparkles} soft size={22} />
+                <Text variant="body" soft style={{ textAlign: 'center' }}>
+                  No tasks scheduled for today.{'\n'}Open your path to plan the next step.
+                </Text>
+              </View>
+            ) : (
+              items.map((it, idx) => (
+                <View
+                  key={it.task.id}
+                  style={{
+                    borderTopWidth: idx === 0 ? 0 : 1,
+                    borderTopColor: colors.hairline,
+                  }}
+                >
+                  <TaskRow
+                    label={it.task.title}
+                    caption={it.task.why ?? `${it.phase.title} · ${it.task.effort ?? ''}`}
+                    done={it.task.status === 'done'}
+                    onToggle={async () => {
+                      await setTaskStatus(
+                        it.task.id,
+                        it.task.status === 'done' ? 'todo' : 'done',
+                      );
+                      setTick((t) => t + 1);
+                    }}
+                  />
+                </View>
+              ))
+            )}
+          </Card>
         </View>
-        <Link href={'/help' as any} accessibilityLabel="Get help now">
-          <Text variant="label" color={colors.crisis}>
-            Help
+      </Rise>
+
+      <Rise delay={180}>
+        <View style={{ gap: space.sm }}>
+          <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+            QUICK CAPTURE
           </Text>
-        </Link>
-      </View>
-
-      {praise && <EncouragementChip text={praise} />}
-
-      <View style={{ gap: space.lg, flex: 1 }}>
-        {lines.map((ln, i) =>
-          ln.who === 'companion' ? (
-            <View key={i} style={{ gap: space.sm }}>
-              <CompanionBubble name={coachName}>{ln.text}</CompanionBubble>
-              {ln.crisis != null && (
-                <CrisisInline
-                  message={crisisExposureAllowed() ? (ln.crisis as string) : ''}
-                  preReview={!crisisExposureAllowed()}
-                  hotlines={hotlinesFor(region.current)}
-                />
-              )}
-            </View>
-          ) : (
-            <View
-              key={i}
-              style={{
-                alignSelf: 'flex-end',
-                maxWidth: '85%',
-                backgroundColor: colors.accent,
-                borderRadius: layout.radius.card,
-                borderTopRightRadius: 6,
-                paddingVertical: space.sm,
-                paddingHorizontal: space.md,
-              }}
-            >
-              <Text variant="body" color="#FFFFFF">
-                {ln.text}
-              </Text>
-            </View>
-          ),
-        )}
-        {busy && (
-          <Text variant="caption" soft>
-            {displayName} is here, thinking with you…
-          </Text>
-        )}
-      </View>
-
-      <View style={{ gap: space.sm }}>
-        {mode === 'career' && (
-          <Button
-            label="I'll commit to this"
-            variant="soft"
-            onPress={async () => {
-              if (!input.trim()) return;
-              await addCommitment('career', input.trim());
-              setInput('');
-              setPraise(null);
-              setLines((l) => [
-                ...l,
-                { who: 'companion', text: "Logged. I'll hold you to that — gently, but I will. 🌱" },
-              ]);
-            }}
-          />
-        )}
-        <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' }}>
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder={`Talk to ${displayName}…`}
-            placeholderTextColor={colors.inkSoft}
-            accessibilityLabel="Message your companion"
-            multiline
+          <Pressable
+            onPress={() => router.navigate('/career/chat' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Add a task or talk to your agent"
             style={{
-              flex: 1,
-              minHeight: layout.controlHeight,
-              maxHeight: 140,
-              borderWidth: 1.5,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.sm,
+              backgroundColor: colors.card,
               borderColor: colors.hairline,
+              borderWidth: 1,
               borderRadius: layout.radius.control,
               paddingHorizontal: space.md,
-              paddingTop: space.sm,
-              color: colors.ink,
-              fontFamily: 'Nunito_500Medium',
-              fontSize: 17,
-              backgroundColor: colors.card,
+              paddingVertical: space.sm,
+              minHeight: 48,
             }}
-          />
-          <Button
-            label="Send"
-            busy={busy}
-            onPress={() => {
-              const t = input.trim();
-              if (!t) return;
-              setInput('');
-              say(t);
-            }}
-            style={{ width: 104 }}
-          />
+          >
+            <Plus size={18} color={colors.inkSoft} strokeWidth={1.75} />
+            <Text variant="body" soft style={{ flex: 1 }}>
+              Add a task, or talk to your agent
+            </Text>
+          </Pressable>
+          <Text variant="caption" soft>
+            Goes straight into Chat — your agent picks the right place for it.
+          </Text>
         </View>
-      </View>
+      </Rise>
+
+      {goal && (
+        <Rise delay={240}>
+          <View style={{ gap: space.sm }}>
+            <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+              PHASES
+            </Text>
+            <View style={{ gap: space.xs }}>
+              {goal.phases.map((ph) => (
+                <View
+                  key={ph.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingVertical: space.sm,
+                    paddingHorizontal: space.md,
+                    backgroundColor: colors.card,
+                    borderColor: colors.hairline,
+                    borderWidth: 1,
+                    borderRadius: layout.radius.control,
+                  }}
+                >
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text variant="body" style={{ fontWeight: '600' }}>
+                      {ph.title}
+                    </Text>
+                    <Text variant="caption" soft>
+                      {ph.meta}
+                    </Text>
+                  </View>
+                  <Chip
+                    label={
+                      ph.status === 'done'
+                        ? 'Done'
+                        : ph.status === 'in_progress'
+                        ? 'Now'
+                        : 'Soon'
+                    }
+                    variant={
+                      ph.status === 'done'
+                        ? 'success'
+                        : ph.status === 'in_progress'
+                        ? 'filled'
+                        : 'muted'
+                    }
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
+        </Rise>
+      )}
     </Screen>
   );
 }

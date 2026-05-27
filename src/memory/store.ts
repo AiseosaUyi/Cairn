@@ -59,7 +59,7 @@ class LocalStore implements MemoryStore {
     try {
       // Lazy import keeps non-Expo test environments working.
       const SQLite = await import('expo-sqlite');
-      this.sqlite = await SQLite.openDatabaseAsync('trueself.db');
+      this.sqlite = await SQLite.openDatabaseAsync('cairn.db');
       await this.sqlite.execAsync(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);

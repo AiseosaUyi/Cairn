@@ -1,7 +1,9 @@
 /**
- * Root layout: load the real typefaces — Fraunces (the companion's warm
- * voice) + Nunito (friendly, credible UI). Never system-ui. Hold the splash
- * on warm canvas until ready.
+ * Root layout: load the typefaces — Inter (UI, body, headings, buttons) +
+ * Instrument Serif (companion voice + one display moment per screen). The
+ * pair targets mature consumer polish (Apple Family / Headspace / Stripe
+ * Atlas), warmth via palette + cadence rather than rounded letterforms.
+ * Hold the splash on warm canvas until ready.
  *
  * Low-bandwidth note (DESIGN.md): @expo-google-fonts is the pragmatic Expo
  * choice; self-hosted woff2 is a tracked follow-up. Fallback stays graceful.
@@ -12,25 +14,29 @@ import { useEffect } from 'react';
 import { Pressable, Text as RNText, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
-  Fraunces_500Medium,
-  Fraunces_600SemiBold,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
   useFonts,
-} from '@expo-google-fonts/fraunces';
+} from '@expo-google-fonts/inter';
 import {
-  Nunito_500Medium,
-  Nunito_600SemiBold,
-  Nunito_700Bold,
-} from '@expo-google-fonts/nunito';
+  InstrumentSerif_400Regular,
+  InstrumentSerif_400Regular_Italic,
+} from '@expo-google-fonts/instrument-serif';
+import { InstallBanner } from '@/components/InstallBanner';
+import { InstallModal } from '@/components/InstallModal';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
-    Fraunces_500Medium,
-    Fraunces_600SemiBold,
-    Nunito_500Medium,
-    Nunito_600SemiBold,
-    Nunito_700Bold,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    InstrumentSerif_400Regular,
+    InstrumentSerif_400Regular_Italic,
   });
 
   useEffect(() => {
@@ -43,6 +49,11 @@ export default function RootLayout() {
     <>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
+      {/* PWA install affordances — both components self-gate (web only,
+          right device class, not already installed, not dismissed) so
+          mounting them globally is safe. */}
+      <InstallBanner />
+      <InstallModal />
     </>
   );
 }
@@ -57,7 +68,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
     <View
       style={{
         flex: 1,
-        backgroundColor: '#FBF6EE',
+        backgroundColor: '#F8F7F4',
         alignItems: 'center',
         justifyContent: 'center',
         padding: 32,
@@ -65,12 +76,12 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
       }}
     >
       <RNText
-        style={{ fontSize: 26, fontWeight: '700', color: '#2A2622', textAlign: 'center' }}
+        style={{ fontSize: 24, fontWeight: '700', color: '#0E0D0B', textAlign: 'center' }}
       >
         Something hiccuped on our end
       </RNText>
       <RNText
-        style={{ fontSize: 17, color: '#7A726A', textAlign: 'center', lineHeight: 26 }}
+        style={{ fontSize: 16, color: '#5E5A52', textAlign: 'center', lineHeight: 24 }}
       >
         Nothing you did, and your data is safe. Let’s try that again.
       </RNText>
@@ -78,15 +89,15 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
         accessibilityRole="button"
         onPress={retry}
         style={{
-          minHeight: 54,
-          paddingHorizontal: 28,
-          borderRadius: 18,
-          backgroundColor: '#E8943A',
+          minHeight: 52,
+          paddingHorizontal: 24,
+          borderRadius: 8,
+          backgroundColor: '#A24F33',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <RNText style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700' }}>
+        <RNText style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.2 }}>
           Try again
         </RNText>
       </Pressable>

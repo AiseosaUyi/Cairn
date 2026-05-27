@@ -1,10 +1,18 @@
 /**
  * Design tokens — single source of truth, transcribed from DESIGN.md.
  *
- * Direction: warm, alive, encouraging. Duolingo's warmth (chunky tactile
- * shapes, friendly rounding, joyful accents, gentle spring) WITHOUT its
- * loss-aversion. The companion still speaks like a warm letter (Fraunces);
- * the world around it is friendly and tactile (Nunito).
+ * Direction (2026-05-26, v3): Mature Consumer — premium editorial sans
+ * with a single warm accent. References: Apple Family pages, Headspace,
+ * Stripe Atlas, Notion marketing. Warmth comes from palette + cadence, not
+ * from rounded letterforms. Inter does the structural work; Instrument
+ * Serif is the one editorial moment per screen (companion voice + the
+ * occasional display).
+ *
+ * Supersedes:
+ * - v1 "Duolingo warmth" (slab buttons, pillowy radii, emoji tabs) — too toy.
+ * - v2 "Quiet Modern" (Fraunces + Nunito + cognac) — both type families
+ *   were optical-soft / rounded-soft, compounding into "playful." Founder
+ *   feedback 2026-05-26: looked odd, wanted top-site polish.
  */
 
 export type Mode = 'career' | 'health';
@@ -12,57 +20,55 @@ export type Scheme = 'light' | 'dark';
 
 const base = {
   light: {
-    canvas: '#FBF6EE',
+    // warm off-white, mature — between pure white and cream
+    canvas: '#F8F7F4',
     card: '#FFFFFF',
-    ink: '#2A2622',
-    inkSoft: '#7A726A',
-    hairline: '#EDE4D6',
+    // near-black with the faintest warmth (not blue-black, not cold)
+    ink: '#0E0D0B',
+    inkSoft: '#5E5A52',
+    hairline: '#E8E4DC',
   },
   dark: {
-    canvas: '#1C1A17',
-    card: '#262320',
-    ink: '#F2EDE4',
-    inkSoft: '#A89E92',
-    hairline: '#37332D',
+    canvas: '#0F0E0C',
+    card: '#1A1916',
+    ink: '#F2EFEA',
+    inkSoft: '#A39F96',
+    hairline: '#2B2924',
   },
 } as const;
 
-// One accent PER MODE — recolors the world (mode-as-place).
+// ONE muted warm accent — terracotta. Reads like museum signage or a worn
+// leather notebook: dignified, considered, warm without candy. Not the
+// prior cognac (still felt food-brand). Career-only at launch — Health
+// accent parked behind the gate.
 const accent: Record<Mode, Record<Scheme, string>> = {
-  career: { light: '#E8943A', dark: '#F0A451' }, // honey / amber
-  health: { light: '#3FA98A', dark: '#56C2A2' }, // fresh sage-mint
+  career: { light: '#A24F33', dark: '#C46A4D' },
+  health: { light: '#3A8B72', dark: '#56C2A2' },
 };
 
-// Darker shade of the accent for the chunky button bottom edge (the
-// satisfying "pressable slab" depth).
-const accentEdge: Record<Mode, Record<Scheme, string>> = {
-  career: { light: '#B86E22', dark: '#C07B2E' },
-  health: { light: '#2E7E66', dark: '#3C8C73' },
-};
-
-// Crisis: calm, serious, NEVER red, NEVER playful.
-const crisis = { light: '#46505E', dark: '#9AA6B4' } as const;
+// Crisis: calm, serious — NEVER red, NEVER playful.
+const crisis = { light: '#3E4754', dark: '#9AA6B4' } as const;
 
 const joy = {
-  light: { coral: '#F2785C', encourage: '#4CB782' },
-  dark: { coral: '#F58E74', encourage: '#63C795' },
+  // muted forest for encouragement (a real kept commitment)
+  light: { coral: '#C25F4A', encourage: '#4A6B3D' },
+  dark: { coral: '#D9745F', encourage: '#6B8A5C' },
 } as const;
 
 const semantic = {
-  light: { success: '#4CB782', caution: '#E0A23A', error: '#D8674F', info: '#5887A8' },
-  dark: { success: '#63C795', caution: '#EBB45C', error: '#E47E68', info: '#7AA3C0' },
+  light: { success: '#4A6B3D', caution: '#A87C2E', error: '#B24A38', info: '#3F6079' },
+  dark: { success: '#6B8A5C', caution: '#C49656', error: '#C25F4A', info: '#6E92AE' },
 } as const;
 
 export function palette(mode: Mode, scheme: Scheme) {
   return {
     ...base[scheme],
     accent: accent[mode][scheme],
-    accentEdge: accentEdge[mode][scheme],
     crisis: crisis[scheme],
     ...joy[scheme],
     ...semantic[scheme],
-    // warm gradient wash — celebration/headers only, never behind body text
-    washTop: scheme === 'light' ? '#FBE0C9' : '#2E2A24',
+    // soft wash for celebratory moments only — low opacity, never under body
+    washTop: scheme === 'light' ? '#F1E5D6' : '#221F1B',
     washBottom: base[scheme].canvas,
   };
 }
@@ -82,54 +88,59 @@ export const space = {
 
 export const layout = {
   maxContentWidth: 540,
-  // pillowy: rounding signals safety + friendliness here
-  radius: { chip: 14, control: 18, card: 24, sheet: 30, full: 9999 },
+  // Tighter geometry — modern consumer polish, not pillowy.
+  radius: { chip: 6, control: 8, card: 12, sheet: 16, full: 9999 },
   minTouchTarget: 44,
-  controlHeight: 54, // chunky, Duolingo-grade
+  controlHeight: 52,
 } as const;
 
-// Soft, layered, never harsh. RN-shaped (iOS shadow + Android elevation).
+// Whisper-soft shadows; 1px hairline borders do the structural work.
 export const shadow = {
   rest: {
-    shadowColor: '#2A2622',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    shadowColor: '#0E0D0B',
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   raised: {
-    shadowColor: '#2A2622',
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+    shadowColor: '#0E0D0B',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
 } as const;
 
 export const type = {
   family: {
-    // Companion voice / display / life-garden narrative — the soul.
-    voice: 'Fraunces_500Medium',
-    voiceBold: 'Fraunces_600SemiBold',
-    // UI / body / labels / buttons — friendly + credible. Never system-ui.
-    ui: 'Nunito_500Medium',
-    uiSemibold: 'Nunito_600SemiBold',
-    uiBold: 'Nunito_700Bold',
+    // Companion voice + one display moment per screen — the editorial touch.
+    voice: 'InstrumentSerif_400Regular',
+    voiceItalic: 'InstrumentSerif_400Regular_Italic',
+    // UI / body / headings / buttons — Inter does the structural work.
+    ui: 'Inter_400Regular',
+    uiMedium: 'Inter_500Medium',
+    uiSemibold: 'Inter_600SemiBold',
+    uiBold: 'Inter_700Bold',
   },
+  // Modern consumer scale — tighter top-end, body floor 16 (a11y locked).
   size: {
-    caption: 14,
-    body: 17, // never below 16 (a11y)
-    lede: 19,
-    h3: 23,
-    h2: 30,
-    h1: 38,
-    display: 50,
+    caption: 13,
+    body: 16,
+    lede: 18,
+    h3: 21,
+    h2: 26,
+    h1: 34,
+    display: 46,
   },
-  lineHeight: { body: 1.55, heading: 1.12 },
+  lineHeight: { body: 1.55, heading: 1.15 },
 } as const;
 
-// Gentle spring; soft settle, not a bounce circus. Crisis = zero motion.
+// Eased breath, never springy. moti `timing` with ease-out for entries,
+// ease-in-out for state changes. Crisis = zero motion (motion sites must
+// check `useReducedMotion()` AND a `frozen` prop).
 export const motion = {
-  spring: { damping: 18, stiffness: 170, mass: 1 },
-  duration: { micro: 120, short: 240, medium: 360, celebrate: 700 },
+  duration: { micro: 90, short: 240, medium: 320, celebrate: 600 },
+  liftPx: 8,
+  press: { scale: 0.97, opacity: 0.85 },
 } as const;

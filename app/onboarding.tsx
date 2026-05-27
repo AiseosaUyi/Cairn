@@ -11,7 +11,6 @@ import { Text } from '@/design/Text';
 import { layout, space, type Mode } from '@/design/tokens';
 import { Button, Card, Screen } from '@/components/ui';
 import { setProfile } from '@/profile';
-import { healthDomainAvailable } from '@/safety/healthGuardrails';
 
 function Field({
   label,
@@ -38,13 +37,13 @@ function Field({
         accessibilityLabel={label}
         style={{
           minHeight: layout.controlHeight,
-          borderWidth: 1.5,
+          borderWidth: 1,
           borderColor: colors.hairline,
           borderRadius: layout.radius.control,
           paddingHorizontal: space.md,
           color: colors.ink,
-          fontFamily: 'Nunito_500Medium',
-          fontSize: 17,
+          fontFamily: 'Inter_400Regular',
+          fontSize: 16,
           backgroundColor: colors.canvas,
         }}
       />
@@ -61,28 +60,28 @@ function Inner() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [coach, setCoach] = useState('');
-  const [region, setRegion] = useState<'NG' | 'US' | 'unknown'>('unknown');
-  const healthOk = healthDomainAvailable();
 
-  async function enter(mode: Mode) {
-    if (mode === 'health' && !healthOk.ok) return;
+  async function enter() {
     const c = coach.trim() || null;
     await setProfile({
       name: name.trim() || null,
-      region,
       coachNames: { career: c, health: c },
-      lastMode: mode,
+      lastMode: 'career' as Mode,
       onboarded: true,
     });
-    router.replace(`/${mode}` as any);
+    // Companion was already picked as a step inside the welcome carousel,
+    // so this is just the small profile capture and we drop straight into
+    // the app. No region collected — wasn't being used downstream.
+    router.replace('/career' as any);
   }
 
   return (
     <Screen>
-      <View style={{ gap: space.xs, marginTop: space.xl }}>
-        <Text variant="display">Let’s set you up</Text>
-        <Text variant="voice" soft>
-          All optional. The more I know, the more I can actually remember.
+      <View style={{ gap: space.sm, marginTop: space.xl }}>
+        <Text variant="display">Last thing.</Text>
+        <Text variant="lede" soft>
+          Both optional. Helps your companion remember you — and call you
+          something if you'd like.
         </Text>
       </View>
 
@@ -93,41 +92,12 @@ function Inner() {
           value={coach}
           onChange={setCoach}
           placeholder="Leave blank for none"
-          hint="By default it’s just “your companion.” Give it a name if you like — you can change this anytime in Settings."
+          hint="Default is just “your companion.” Name it if you like — change anytime in Settings."
         />
-        <Text variant="label" style={{ marginTop: space.sm }}>
-          Where are you?
-        </Text>
-        <View style={{ flexDirection: 'row', gap: space.sm }}>
-          {(['NG', 'US', 'unknown'] as const).map((r) => (
-            <Button
-              key={r}
-              label={r === 'unknown' ? 'Skip' : r}
-              variant={region === r ? 'primary' : 'ghost'}
-              onPress={() => setRegion(r)}
-              style={{ flex: 1 }}
-            />
-          ))}
-        </View>
-        <Text variant="caption" soft>
-          Only used to show the right local support. Never shared.
-        </Text>
       </Card>
 
       <View style={{ gap: space.sm }}>
-        <Text variant="h3">Which world shall we step into?</Text>
-        <Button label="Career" onPress={() => enter('career')} />
-        <Button
-          label={healthOk.ok ? 'Health' : 'Health  ·  opening soon'}
-          variant="soft"
-          disabled={!healthOk.ok}
-          onPress={() => enter('health')}
-        />
-        <Text variant="caption" soft>
-          {healthOk.ok
-            ? 'Switch worlds anytime in Settings. One at a time, on purpose.'
-            : healthOk.notice}
-        </Text>
+        <Button label="Open the app" onPress={enter} />
       </View>
     </Screen>
   );
