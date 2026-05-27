@@ -141,14 +141,11 @@ function Inner() {
           <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
             RESET PASSWORD
           </Text>
-          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 36, lineHeight: 40, color: colors.ink }}>
-            Set a{' '}
-            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 36 }}>
-              new password.
+          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 40, lineHeight: 44, color: colors.ink }}>
+            New{' '}
+            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 40 }}>
+              password.
             </Text>
-          </Text>
-          <Text variant="lede" soft style={{ marginTop: 4 }}>
-            Make it long. Mix in something unguessable.
           </Text>
         </View>
       </Rise>

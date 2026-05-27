@@ -163,18 +163,18 @@ function Inner() {
       <Rise>
         <View style={{ gap: 6, marginTop: space.sm }}>
           <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
-            CREATE YOUR ACCOUNT
+            STEP 1 OF 3
           </Text>
-          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 38, lineHeight: 42, color: colors.ink }}>
-            Save your progress —{' '}
+          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 40, lineHeight: 44, color: colors.ink }}>
+            Your{' '}
             <Text
               style={{
                 fontFamily: 'InstrumentSerif_400Regular_Italic',
                 color: colors.accent,
-                fontSize: 38,
+                fontSize: 40,
               }}
             >
-              across every device.
+              details.
             </Text>
           </Text>
         </View>

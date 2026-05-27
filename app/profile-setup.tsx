@@ -423,17 +423,13 @@ function Inner() {
       <Rise>
         <View style={{ gap: 6, marginTop: space.sm }}>
           <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
-            ABOUT YOU
+            STEP 2 OF 3
           </Text>
-          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 38, lineHeight: 42, color: colors.ink }}>
-            A bit of{' '}
-            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 38 }}>
-              context.
+          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 40, lineHeight: 44, color: colors.ink }}>
+            Your{' '}
+            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 40 }}>
+              background.
             </Text>
-          </Text>
-          <Text variant="lede" soft style={{ marginTop: 4 }}>
-            So your companion gives you advice that fits where you are —
-            not generic LinkedIn-post energy.
           </Text>
         </View>
       </Rise>

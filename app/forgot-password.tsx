@@ -66,17 +66,13 @@ function Inner() {
       <Rise>
         <View style={{ gap: 6, marginTop: space.sm }}>
           <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
-            RESET PASSWORD
+            FORGOT PASSWORD
           </Text>
-          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 36, lineHeight: 40, color: colors.ink }}>
-            We'll email you a{' '}
-            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 36 }}>
-              reset link.
+          <Text style={{ fontFamily: 'InstrumentSerif_400Regular', fontSize: 40, lineHeight: 44, color: colors.ink }}>
+            Reset{' '}
+            <Text style={{ fontFamily: 'InstrumentSerif_400Regular_Italic', color: colors.accent, fontSize: 40 }}>
+              link.
             </Text>
-          </Text>
-          <Text variant="lede" soft style={{ marginTop: 4 }}>
-            Enter the email on your account. We'll send a link that opens
-            a reset page on this site — same one you're on now.
           </Text>
         </View>
       </Rise>
