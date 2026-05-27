@@ -20,6 +20,15 @@ const SAFE_DEFERRAL =
   'much. Let me sit with it. Can you say a little more about what you need ' +
   'right now?';
 
+// Separate copy for transport-layer failures (proxy 500s, network blips,
+// missing API key). The warm "don't want to give you something half-formed"
+// makes the user think the agent is being precious — but the actual problem
+// is technical and the user can fix it (or just retry). Be honest about it.
+const TRANSPORT_ERROR =
+  "I couldn't reach my brain just now — there might be a connection or " +
+  'server-config issue. Try sending that again in a moment. If it keeps ' +
+  'happening, the model proxy probably needs an API key set on the server.';
+
 function looksMalformed(text: string): boolean {
   const t = text.trim();
   if (t.length < 2) return true;
@@ -46,11 +55,12 @@ export async function completeSafe(
       return { text: SAFE_DEFERRAL, deferred: true, reason: 'refusal' };
     }
     // Provider returned an error envelope (e.g. proxy 500, OpenAI 401).
-    // Without this branch the raw error string ("HTTP 500", "OpenAI 401:
-    // Incorrect API key") would land in the companion bubble.
+    // Use the TRANSPORT_ERROR copy so the user sees "couldn't reach my
+    // brain" — which is honest and diagnosable — rather than the warm
+    // refusal copy that makes the agent look precious.
     if (last.stop === 'error') {
       if (attempt < maxRetries) continue;
-      return { text: SAFE_DEFERRAL, deferred: true, reason: 'error' };
+      return { text: TRANSPORT_ERROR, deferred: true, reason: 'error' };
     }
     const text = (last.text ?? '').trim();
     if (!text) {
