@@ -19,14 +19,32 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
+// Metro doesn't honor package.json `exports` subpath maps by default,
+// which breaks any modern package that uses them (botid, @vercel/sandbox,
+// etc.). Opt in to the modern resolver.
+config.resolver.unstable_enablePackageExports = true;
+
 const OPTIONAL_EMPTY_MODULES = new Set([
   '@opentelemetry/api',
 ]);
+
+// Web-only modules: shim to empty on native builds so the dynamic
+// import doesn't blow up the dependency graph. The runtime guards
+// (`Platform.OS !== 'web' return`) prevent execution; this prevents
+// resolution failure during the native bundle pass.
+const WEB_ONLY_PREFIXES = ['botid'];
 
 const originalResolve = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (OPTIONAL_EMPTY_MODULES.has(moduleName)) {
     return { type: 'empty' };
+  }
+  if (platform !== 'web') {
+    for (const prefix of WEB_ONLY_PREFIXES) {
+      if (moduleName === prefix || moduleName.startsWith(`${prefix}/`)) {
+        return { type: 'empty' };
+      }
+    }
   }
   if (typeof originalResolve === 'function') {
     return originalResolve(context, moduleName, platform);
