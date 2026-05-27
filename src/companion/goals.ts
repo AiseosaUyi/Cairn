@@ -333,20 +333,45 @@ export type GoalIntent =
 
 function inferIntent(title: string): GoalIntent {
   const t = title.toLowerCase();
-  if (/(promot|level\s*up|next\s*level|senior\s*at)/.test(t)) return 'get-promo';
+
+  // FOUNDER — strict. Must be about starting THEIR OWN thing, not joining
+  // as a "founding <role>" (which is just employee-#1 at a young company —
+  // that's a senior job-search, not founding). Previous regex `/found/`
+  // matched "founding designer" → wrong path. Tightened to word-boundary
+  // \bfounder\b + explicit phrases, AND excludes "founding <role>" forms.
+  if (
+    (/\bfounder\b|first[-\s]*time\s+founder|start\s+(my\s*own|a)\s+(company|startup|business)|build\s+my\s+(own\s+)?(startup|company|business)|(?:leap|jump|move)\s+into\s+founding\b/.test(t)) &&
+    !/founding\s+(designer|engineer|pm|product\s*manager|developer|member|employee|team)/.test(t)
+  ) return 'founder';
+
+  // FOUNDING-<ROLE> — explicitly a job search for the first-N hires at a
+  // young company. Belongs in land-senior, not founder. Caught here
+  // before the more general land-senior pattern so the wording around
+  // "role" doesn't have to match.
+  if (/founding\s+(designer|engineer|pm|product\s*manager|developer)/.test(t))
+    return 'land-senior';
+
+  if (/(promot|level\s*up|next\s*level)/.test(t)) return 'get-promo';
   if (/(negotiat|raise|offer\s*letter|comp\b|salary)/.test(t)) return 'negotiate';
   if (/(switch|pivot|transition|move\s+(into|from)|change\s+industr|new\s+function)/.test(t))
     return 'switch';
-  if (/(first\s*job|break\s*into|land\s*my\s*first|grad)/.test(t)) return 'first-job';
-  if (/(found|start\s*(a|my)\s*company|build\s*my\s*startup|first[-\s]*time\s*founder)/.test(t))
-    return 'founder';
+  if (/(first\s*job|break\s+into|land\s+my\s+first|grad(uate)?)/.test(t)) return 'first-job';
   if (/(honest|real\s*(feedback|review|analysis)|manager.?grade|performance\s*review)/.test(t))
     return 'real-feedback';
-  if (/(improve|focus|fix\s*my|weak|gap)/.test(t)) return 'improve-areas';
-  if (/(stay\s*valuable|future\s*-?\s*proof|relevant|learn\s*to|skill[-\s]*up)/.test(t))
+  if (/(stay\s*valuable|future\s*-?\s*proof|relevant\s+over\s+time|skill[-\s]*up)/.test(t))
     return 'stay-valuable';
-  if (/(what'?s?\s*next|next\s*chapter|figure\s*out|not\s*sure)/.test(t)) return 'sense-next';
-  if (/(land|senior\s*role|new\s*role)/.test(t)) return 'land-senior';
+  if (/(what'?s?\s*next|next\s*chapter|figure\s+out\s+what|not\s+sure\s+what)/.test(t))
+    return 'sense-next';
+  if (/^\s*(improve|focus|fix\s*my|weak|gap)\b/.test(t)) return 'improve-areas';
+
+  // LAND-SENIOR — default for job-search-shaped goals. Widened to catch
+  // "get hired", "get a new job", "find a role", "looking for a job" etc.
+  if (
+    /\b(land|hired|find|get|need|want|looking\s+for)\b.*\b(job|role|position|offer|gig)\b/.test(t) ||
+    /\b(new|next|senior|fulltime|full[-\s]?time|part[-\s]?time|contract)\b.*\b(job|role|position)\b/.test(t) ||
+    /\b(senior\s+role|new\s+role|land\s+a\s+role)\b/.test(t)
+  ) return 'land-senior';
+
   return 'custom';
 }
 
