@@ -39,7 +39,7 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "output": "server",
+      "output": "static",
       "name": "Cairn",
       "shortName": "Cairn",
       "description": "Your AI career companion — goal-first, not a chatbot.",

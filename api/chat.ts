@@ -1,33 +1,31 @@
 /**
- * /api/chat — server-side OpenAI proxy.
+ * /api/chat — OpenAI proxy as a Vercel Serverless Function.
  *
- * Expo Router API route (the `+api.ts` suffix). In dev, served by the
- * Expo dev server. In production on Vercel, deploys as a Vercel
- * Function. The OpenAI key lives ONLY here (process.env.OPENAI_API_KEY,
- * no EXPO_PUBLIC_ prefix → never bundled to the client).
+ * This file lives at the PROJECT ROOT /api/, not under app/. That's
+ * Vercel's native auto-detect path — every .ts file in /api/ deploys
+ * as a serverless function automatically, regardless of framework
+ * (Expo, Next, Astro, whatever). Bulletproof routing.
  *
- * Client uses src/llm/provider.ts which POSTs here with the message
- * list; we forward to OpenAI Chat Completions and return the shape
- * the client expects: { text, stop }.
+ * Key stays server-side: process.env.OPENAI_API_KEY (no EXPO_PUBLIC_
+ * prefix). Client posts here; we forward to OpenAI; return the shape
+ * the LlmProvider in src/llm/provider.ts expects: { text, stop }.
  *
- * Hardening to add when this leaves friends-test mode:
- *   - Auth: require a valid Supabase session before calling OpenAI
- *   - Rate limit: per-user requests/minute (Upstash Redis or Vercel KV)
- *   - Streaming: switch to SSE so long replies feel faster
- *   - Per-user spend tracking (log token counts to Supabase)
- *
- * For now: open endpoint + OpenAI account spend cap = acceptable for
- * a small friends-test, BAD for any wider audience.
+ * Hardening to add post-friends-test: auth gate (require Supabase
+ * session), rate limiting, streaming, per-user token accounting.
  */
 
-interface ChatRequest {
+interface ChatBody {
   messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   model?: string;
 }
 
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
-export async function POST(request: Request) {
+export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
+  }
+
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
     return Response.json(
@@ -36,9 +34,9 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: ChatRequest;
+  let body: ChatBody;
   try {
-    body = (await request.json()) as ChatRequest;
+    body = (await request.json()) as ChatBody;
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }

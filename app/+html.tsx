@@ -69,10 +69,17 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="theme-color" content="#A24F33" />
         <meta name="background-color" content="#F8F7F4" />
 
+        {/* Favicon + browser tab icons */}
+        <link rel="icon" type="image/png" sizes="48x48" href="/assets/favicon.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png" />
+
         {/* iOS Safari install hints — required for "Add to Home Screen" */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Cairn" />
+        <link rel="apple-touch-icon" sizes="192x192" href="/assets/icon-192.png" />
+        <link rel="apple-touch-icon" sizes="512x512" href="/assets/icon-512.png" />
         <link rel="apple-touch-icon" href="/assets/icon.png" />
 
         {/* OpenGraph (Facebook, LinkedIn, iMessage, Slack) */}
