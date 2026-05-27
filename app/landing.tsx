@@ -189,12 +189,16 @@ function Hero() {
         </Rise>
 
         <Rise delay={240}>
+          {/* CTAs: stacked + full-width on mobile (clear primary action),
+              side-by-side and auto-sized on desktop (less aircraft-runway,
+              more premium product page). */}
           <View
             style={{
-              flexDirection: 'column',
+              flexDirection: isDesktop ? 'row' : 'column',
               gap: space.sm,
-              width: '100%',
-              maxWidth: 480,
+              width: isDesktop ? 'auto' : '100%',
+              maxWidth: isDesktop ? undefined : 420,
+              alignSelf: 'flex-start',
             }}
           >
             <Pressable
@@ -204,7 +208,7 @@ function Hero() {
               style={{
                 backgroundColor: colors.ink,
                 paddingVertical: space.md,
-                paddingHorizontal: space.lg,
+                paddingHorizontal: isDesktop ? space.xl : space.lg,
                 borderRadius: layout.radius.full,
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -225,7 +229,7 @@ function Hero() {
               style={{
                 backgroundColor: 'transparent',
                 paddingVertical: space.md,
-                paddingHorizontal: space.lg,
+                paddingHorizontal: isDesktop ? space.xl : space.lg,
                 borderRadius: layout.radius.full,
                 borderColor: colors.hairline,
                 borderWidth: 1,

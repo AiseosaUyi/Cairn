@@ -20,8 +20,11 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
-// Update once a domain is locked in. Currently a placeholder.
-const SITE_URL = 'https://cairn.app';
+// Canonical site URL — used for og:image, og:url, canonical, and JSON-LD.
+// Set EXPO_PUBLIC_SITE_URL in Vercel env to your actual deploy URL
+// (e.g. https://cairn-lac.vercel.app or https://cairn.app once domain
+// lands). Default is a placeholder — social previews break if it's wrong.
+const SITE_URL = (process.env.EXPO_PUBLIC_SITE_URL ?? 'https://cairn.app').replace(/\/$/, '');
 const DEFAULT_DESCRIPTION =
   'AI career mentor with eight specialist companions. State your goal, get a step-by-step path with daily tasks. Goal-first, not a chatbot.';
 
