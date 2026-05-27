@@ -105,85 +105,34 @@ function Inner() {
         </Text>
       </View>
 
-      <View style={{ gap: space.sm, marginTop: space.lg }}>
-        <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
-          ONE LAST THING
-        </Text>
+      <View style={{ gap: space.sm, marginTop: space.xl, flex: 1, justifyContent: 'center' }}>
         <Text
           style={{
             fontFamily: 'InstrumentSerif_400Regular',
-            fontSize: 42,
-            lineHeight: 46,
+            fontSize: 48,
+            lineHeight: 52,
             color: colors.ink,
-            letterSpacing: -0.8,
+            letterSpacing: -0.9,
           }}
         >
-          Save your progress —{' '}
+          Get{' '}
           <Text
             style={{
               fontFamily: 'InstrumentSerif_400Regular_Italic',
               color: colors.accent,
-              fontSize: 42,
-              letterSpacing: -0.8,
+              fontSize: 48,
+              letterSpacing: -0.9,
             }}
           >
-            or try it first.
+            started.
           </Text>
         </Text>
-        <Text variant="lede" soft style={{ lineHeight: 24, marginTop: 4 }}>
-          An account syncs your goal and path across devices and lets your
-          companion remember context between sessions. Guest mode keeps
-          everything on this device — no email, no sign-up, you can sign
-          in later from the You tab.
+        <Text variant="lede" soft style={{ marginTop: 4 }}>
+          Save your progress, or try it as a guest.
         </Text>
       </View>
 
-      {/* What you'll set up next — micro-roadmap so the user knows the
-          three steps ahead and doesn't feel like sign-up is a black box. */}
-      <View
-        style={{
-          backgroundColor: colors.card,
-          borderColor: colors.hairline,
-          borderWidth: 1,
-          borderRadius: layout.radius.card,
-          padding: space.md,
-          gap: space.sm,
-          ...shadow.rest,
-        }}
-      >
-        <Text variant="caption" soft style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11 }}>
-          NEXT, IN UNDER 90 SECONDS
-        </Text>
-        {[
-          'Your role + experience — so the companion calibrates advice',
-          'Pick your companion — eight specialists, each a different lens',
-          'State your first goal — and we build the path together',
-        ].map((step, i) => (
-          <View key={i} style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' }}>
-            <View
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                backgroundColor: colors.canvas,
-                borderColor: colors.hairline,
-                borderWidth: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Text variant="caption" style={{ fontSize: 11, fontWeight: '700' }}>
-                {i + 1}
-              </Text>
-            </View>
-            <Text variant="body" style={{ flex: 1, fontSize: 14, lineHeight: 20 }}>
-              {step}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      <View style={{ gap: space.sm, marginTop: space.sm }}>
+      <View style={{ gap: space.sm }}>
         <PrimaryButton
           label="Create an account"
           Icon={UserPlus2}
