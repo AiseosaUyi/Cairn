@@ -12,6 +12,11 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 const root = new URL('..', import.meta.url).pathname;
 const brand = `${root}assets/brand`;
 mkdirSync(`${brand}/store`, { recursive: true });
+// Ensure the web-served directory exists. PWA manifest icon URLs
+// (manifest.webmanifest) point at /assets/*.png which Vercel serves
+// from public/assets/. Without these files the manifest fails Chrome's
+// installability check and beforeinstallprompt never fires.
+mkdirSync(`${root}public/assets`, { recursive: true });
 
 const render = (svg, w, out) => {
   const r = new Resvg(svg, { fitTo: { mode: 'width', value: w }, background: 'rgba(0,0,0,0)' });
@@ -19,13 +24,22 @@ const render = (svg, w, out) => {
   console.log('→', out.replace(root, ''));
 };
 
+/** Render to both the native Expo asset path and the web public/ path
+ *  so PWA install criteria are met. */
+const renderBoth = (svg, w, name) => {
+  render(svg, w, `${root}assets/${name}`);
+  render(svg, w, `${root}public/assets/${name}`);
+};
+
 const logo = readFileSync(`${brand}/logo.svg`, 'utf8');
 
 // App icon + adaptive foreground + splash + favicon, all from one mark.
-render(logo, 1024, `${root}assets/icon.png`);
-render(logo, 1024, `${root}assets/adaptive-icon.png`);
-render(logo, 1024, `${root}assets/splash-icon.png`);
-render(logo, 96, `${root}assets/favicon.png`);
+renderBoth(logo, 1024, 'icon.png');
+renderBoth(logo, 512, 'icon-512.png');
+renderBoth(logo, 192, 'icon-192.png');
+renderBoth(logo, 1024, 'adaptive-icon.png');
+renderBoth(logo, 1024, 'splash-icon.png');
+renderBoth(logo, 96, 'favicon.png');
 
 // --- Art-directed store frames (1242 x 2208) ----------------------------
 const seedMark = readFileSync(`${brand}/logo.svg`, 'utf8')
