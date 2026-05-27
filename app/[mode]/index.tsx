@@ -354,7 +354,7 @@ export default function Today() {
             QUICK CAPTURE
           </Text>
           <Pressable
-            onPress={() => router.navigate('/career/chat' as any)}
+            onPress={() => router.navigate('/career/chat?preset=adjust-path' as any)}
             accessibilityRole="button"
             accessibilityLabel="Add a task or talk to your agent"
             style={{
@@ -376,7 +376,7 @@ export default function Today() {
             </Text>
           </Pressable>
           <Text variant="caption" soft>
-            Goes straight into Chat — your agent picks the right place for it.
+            Opens Chat with your full path in context — agent picks where to put it.
           </Text>
         </View>
       </Rise>

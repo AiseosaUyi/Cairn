@@ -1,0 +1,10 @@
+# Cairn — robots
+User-agent: *
+Allow: /
+
+# Don't let crawlers waste budget on in-app routes that need user state.
+Disallow: /career
+Disallow: /career/
+Disallow: /companion-picker
+
+Sitemap: https://cairn.app/sitemap.xml

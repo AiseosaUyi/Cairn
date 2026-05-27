@@ -149,35 +149,6 @@ function Hero() {
       />
 
       <View style={{ width: '100%', maxWidth: MAX_W, gap: space.xl }}>
-        <Rise>
-          <View
-            style={{
-              alignSelf: 'flex-start',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              borderColor: colors.hairline,
-              borderWidth: 1,
-              borderRadius: layout.radius.full,
-              paddingHorizontal: space.sm,
-              paddingVertical: 4,
-              backgroundColor: '#FFFFFF',
-            }}
-          >
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: colors.encourage,
-              }}
-            />
-            <Text variant="caption" soft style={{ fontWeight: '600', letterSpacing: 0.4, fontSize: 11 }}>
-              CAREER AI · GOAL-FIRST · NOT A CHATBOT
-            </Text>
-          </View>
-        </Rise>
-
         <Rise delay={80}>
           <Text
             style={{
@@ -270,31 +241,6 @@ function Hero() {
           </View>
         </Rise>
 
-        <Rise delay={320}>
-          <View style={{ flexDirection: 'row', gap: space.lg, marginTop: space.md, flexWrap: 'wrap' as any }}>
-            {[
-              { num: '8', label: 'AI specialists' },
-              { num: '12 wk', label: 'Avg. goal horizon' },
-              { num: '0', label: 'Streak guilt' },
-            ].map((s) => (
-              <View key={s.label} style={{ gap: 2 }}>
-                <Text
-                  style={{
-                    fontFamily: 'InstrumentSerif_400Regular',
-                    fontSize: 28,
-                    color: colors.ink,
-                    letterSpacing: -0.5,
-                  }}
-                >
-                  {s.num}
-                </Text>
-                <Text variant="caption" soft style={{ letterSpacing: 0.3, fontWeight: '500' }}>
-                  {s.label.toUpperCase()}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </Rise>
       </View>
     </View>
   );

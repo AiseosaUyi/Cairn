@@ -1,10 +1,20 @@
 /**
- * LLM provider abstraction. The single seam so a model outage is one swap,
- * not a rewrite. Default = mock (zero credentials, the whole loop runs today).
+ * LLM provider abstraction. The single seam so a model outage is one
+ * swap, not a rewrite. Default = mock (zero credentials, the whole
+ * loop runs).
  *
- * LLM single-point-of-failure was an accepted risk for the tiny alpha
- * (eng-review); the interface is the cheap seam that lets fallback land later.
+ * Provider model after the 2026-05-27 security fix:
+ *   - OpenAIProvider posts to OUR server route (/api/chat). The
+ *     real OpenAI key lives ONLY in process.env.OPENAI_API_KEY on
+ *     the server (Vercel Function). The client never sees it.
+ *   - MockProvider is unchanged — deterministic offline replies, no
+ *     network, no key.
+ *
+ * Native note: relative URLs work on web. When native binaries ship
+ * later, set EXPO_PUBLIC_API_BASE_URL so the native client knows
+ * which absolute URL to hit (e.g. https://cairn.app/api/chat).
  */
+
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -12,7 +22,7 @@ export interface LlmMessage {
 
 export interface LlmResult {
   text: string;
-  /** Provider-reported stop reason; "refusal" must route to the safe path. */
+  /** Provider-reported stop reason; "refusal" routes to the safe path. */
   stop: 'ok' | 'refusal' | 'length' | 'error';
 }
 
@@ -21,11 +31,14 @@ export interface LlmProvider {
   complete(messages: LlmMessage[]): Promise<LlmResult>;
 }
 
-/**
- * Mock provider. Deterministic, offline, shaped like the real companion:
- * it reflects the injected memory back so the ritual + recall are visible
- * without an API key. Not intelligent — honest scaffolding.
- */
+/** Resolve the API base URL — relative on web, env-driven on native. */
+function apiBase(): string {
+  return process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+}
+
+// ---------------------------------------------------------------------------
+// Mock provider — deterministic, offline, useful for tests + key-less dev.
+// ---------------------------------------------------------------------------
 class MockProvider implements LlmProvider {
   name = 'mock';
   async complete(messages: LlmMessage[]): Promise<LlmResult> {
@@ -56,26 +69,90 @@ class MockProvider implements LlmProvider {
   }
 }
 
-/** Real adapters — guarded stubs. They throw clearly; caller falls back to mock. */
-class HttpProvider implements LlmProvider {
-  constructor(public name: string) {}
-  async complete(): Promise<LlmResult> {
-    throw new Error(
-      `${this.name} adapter needs EXPO_PUBLIC_LLM_API_KEY. Wire the real ` +
-        `HTTP call here (with prompt caching for the system block). Until then ` +
-        `the mock keeps the loop runnable.`,
-    );
+// ---------------------------------------------------------------------------
+// OpenAI provider — calls OUR /api/chat proxy. Key stays server-side.
+// ---------------------------------------------------------------------------
+class OpenAIProvider implements LlmProvider {
+  name: string;
+  constructor(private model: string) {
+    this.name = `openai:${model}`;
+  }
+
+  async complete(messages: LlmMessage[]): Promise<LlmResult> {
+    try {
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, model: this.model }),
+      });
+
+      if (!res.ok) {
+        const err = await safeJson(res);
+        return {
+          stop: 'error',
+          text: err?.error ?? `HTTP ${res.status}`,
+        };
+      }
+
+      const json = (await res.json()) as { text?: string; stop?: string };
+      const finish = json.stop ?? 'stop';
+      const stop: LlmResult['stop'] =
+        finish === 'stop' ? 'ok'
+        : finish === 'length' ? 'length'
+        : finish === 'content_filter' ? 'refusal'
+        : 'error';
+      return { stop, text: json.text ?? '' };
+    } catch (e) {
+      return {
+        stop: 'error',
+        text: e instanceof Error ? e.message : String(e),
+      };
+    }
   }
 }
 
+async function safeJson(res: Response): Promise<{ error?: string } | null> {
+  try {
+    return (await res.json()) as { error?: string };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic provider — stub. Implement when needed (same proxy pattern;
+// add /api/chat?provider=anthropic or a separate route).
+// ---------------------------------------------------------------------------
+class AnthropicProvider implements LlmProvider {
+  name = 'anthropic';
+  constructor(private _model: string) {}
+  async complete(_messages: LlmMessage[]): Promise<LlmResult> {
+    return {
+      stop: 'error',
+      text:
+        'Anthropic provider not implemented yet. Set EXPO_PUBLIC_LLM_PROVIDER=openai ' +
+        'or =mock for now.',
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Factory + lazy singleton.
+//
+// EXPO_PUBLIC_LLM_API_KEY is no longer read — the key is server-side.
+// EXPO_PUBLIC_LLM_MODEL still picks which OpenAI model the proxy uses.
+// ---------------------------------------------------------------------------
 let provider: LlmProvider | null = null;
 
 export function getProvider(): LlmProvider {
   if (provider) return provider;
-  const choice = process.env.EXPO_PUBLIC_LLM_PROVIDER ?? 'mock';
-  const key = process.env.EXPO_PUBLIC_LLM_API_KEY;
-  if ((choice === 'anthropic' || choice === 'openai') && key) {
-    provider = new HttpProvider(choice);
+  const choice = (process.env.EXPO_PUBLIC_LLM_PROVIDER ?? 'mock').toLowerCase();
+  const model = process.env.EXPO_PUBLIC_LLM_MODEL ?? 'gpt-4.1-mini';
+
+  if (choice === 'openai') {
+    provider = new OpenAIProvider(model);
+  } else if (choice === 'anthropic') {
+    provider = new AnthropicProvider(model);
   } else {
     provider = new MockProvider();
   }
@@ -84,4 +161,10 @@ export function getProvider(): LlmProvider {
 
 export function setProvider(p: LlmProvider) {
   provider = p;
+}
+
+/** Test/dev helper: reset the cached provider so the next getProvider() call
+ *  re-reads env vars. Useful after env changes during HMR. */
+export function resetProvider() {
+  provider = null;
 }

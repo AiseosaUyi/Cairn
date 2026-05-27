@@ -17,7 +17,7 @@ import { useCallback, useState } from 'react';
 import { Alert, Image, Platform, Pressable, Share, TextInput, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useLocalSearchParams } from 'expo-router';
-import { ChevronRight, ImagePlus, Mail, Trash2 } from 'lucide-react-native';
+import { Check, ChevronRight, Cloud, CloudOff, ImagePlus, LogOut, Mail, Trash2 } from 'lucide-react-native';
 import { useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
 import { layout, motion, shadow, space, type Mode } from '@/design/tokens';
@@ -27,14 +27,17 @@ import { Button, Card, Mascot, Rise, Screen } from '@/components/ui';
 import {
   EXPERIENCE_LEVELS,
   getProfile,
+  resetProfileCache,
   setProfile,
   wipeProfile,
   type ExperienceLevel,
   type Profile,
 } from '@/profile';
+import { resetGoalsCache } from '@/companion/goals';
 import { getStore } from '@/memory/store';
 import { findCharacter } from '@/companion/characters';
 import { CONTACT_EMAIL } from '@/legal/content';
+import { signOut, useAuth } from '@/auth/useAuth';
 
 const ROLE_SUGGESTIONS = [
   'Product Manager',
@@ -348,6 +351,15 @@ export default function You() {
 
   const version = Constants.expoConfig?.version ?? '0.1.0';
   const companion = findCharacter(p?.companionId ?? null);
+  const auth = useAuth();
+
+  async function onSignOut() {
+    await signOut();
+    resetProfileCache();
+    resetGoalsCache();
+    // Force a re-read of the now-local profile.
+    getProfile().then(setP);
+  }
 
   return (
     <Screen>
@@ -419,6 +431,106 @@ export default function You() {
           </View>
         </Card>
       </Rise>
+
+      {/* Account — sign-in / sign-out. Hidden entirely when Supabase
+          isn't configured (env not set) so the section never renders
+          a dead link. */}
+      {auth.enabled && (
+        <Rise delay={90}>
+          {auth.user ? (
+            <View
+              style={{
+                padding: space.md,
+                borderRadius: layout.radius.card,
+                backgroundColor: colors.card,
+                borderColor: colors.hairline,
+                borderWidth: 1,
+                gap: space.sm,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+                <View
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: layout.radius.full,
+                    backgroundColor: colors.encourage,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Cloud size={18} color="#FFFFFF" strokeWidth={1.75} />
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text variant="body" style={{ fontWeight: '600' }}>
+                    Backed up
+                  </Text>
+                  <Text variant="caption" soft numberOfLines={1}>
+                    {auth.user.email ?? 'Signed in'}
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={onSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: space.xs,
+                  paddingVertical: space.sm,
+                  borderRadius: layout.radius.full,
+                  borderColor: colors.hairline,
+                  borderWidth: 1,
+                }}
+              >
+                <LogOut size={14} color={colors.ink} strokeWidth={1.75} />
+                <Text variant="caption" style={{ fontWeight: '600', fontSize: 13 }}>
+                  Sign out
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => router.push('/sign-in' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in to back up across devices"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.sm,
+                padding: space.md,
+                borderRadius: layout.radius.card,
+                backgroundColor: colors.ink,
+                ...shadow.raised,
+              }}
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: layout.radius.full,
+                  backgroundColor: 'rgba(255,255,255,0.12)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <CloudOff size={18} color="#FFFFFF" strokeWidth={1.75} />
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text variant="body" color="#FFFFFF" style={{ fontWeight: '600' }}>
+                  Back up across devices
+                </Text>
+                <Text variant="caption" color="rgba(255,255,255,0.65)">
+                  Sign in with email to follow your goal anywhere
+                </Text>
+              </View>
+              <ChevronRight size={18} color="rgba(255,255,255,0.65)" strokeWidth={1.75} />
+            </Pressable>
+          )}
+        </Rise>
+      )}
 
       {/* Companion picker entry */}
       <Rise delay={120}>

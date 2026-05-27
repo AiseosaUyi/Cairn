@@ -1,14 +1,52 @@
 /**
- * Custom HTML wrapper — Expo Router serves this as the document on web.
+ * Custom HTML wrapper — Expo Router serves this as the document on web,
+ * pre-rendered into every route's HTML at static-export time. Native
+ * builds ignore this file.
  *
- * Injects the PWA manifest link, iOS Safari install hints (Apple's
- * `apple-mobile-web-app-*` meta tags), the theme color, and registers
- * the service worker on first paint. Native builds ignore this file.
+ * Holds the SEO + PWA scaffolding that has to be in <head> for crawlers
+ * and install prompts to work:
+ *   • PWA manifest + iOS install hints
+ *   • OpenGraph + Twitter card defaults
+ *   • JSON-LD structured data (Organization + SoftwareApplication)
+ *   • Theme color
+ *   • Service-worker registration on first paint
+ *   • beforeinstallprompt capture (so the React-side hook can fire it)
+ *
+ * Per-route titles / descriptions are layered on top via
+ * `<Head>` from 'expo-router/head' inside individual screens.
  *
  * Reference: https://docs.expo.dev/router/reference/static-rendering/
  */
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
+
+// Update once a domain is locked in. Currently a placeholder.
+const SITE_URL = 'https://cairn.app';
+const DEFAULT_DESCRIPTION =
+  'AI career mentor with eight specialist companions. State your goal, get a step-by-step path with daily tasks. Goal-first, not a chatbot.';
+
+const ORG_JSONLD = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Cairn',
+  url: SITE_URL,
+  logo: `${SITE_URL}/assets/icon.png`,
+};
+
+const APP_JSONLD = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Cairn',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web, iOS, Android',
+  description: DEFAULT_DESCRIPTION,
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+  aggregateRating: undefined, // add once you have real reviews
+};
 
 export default function Root({ children }: PropsWithChildren) {
   return (
@@ -21,31 +59,57 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=0, viewport-fit=cover"
         />
 
+        {/* Title + description — per-route <Head> overrides these. */}
+        <title>Cairn — AI Career Companion</title>
+        <meta name="description" content={DEFAULT_DESCRIPTION} />
+        <link rel="canonical" href={SITE_URL} />
+
         {/* PWA manifest */}
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="theme-color" content="#A24F33" />
         <meta name="background-color" content="#F8F7F4" />
 
-        {/* iOS Safari install hints — iOS ignores the manifest's display:
-            standalone for "Add to Home Screen" unless these are present. */}
+        {/* iOS Safari install hints — required for "Add to Home Screen" */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Cairn" />
         <link rel="apple-touch-icon" href="/assets/icon.png" />
 
-        {/* Social card defaults */}
+        {/* OpenGraph (Facebook, LinkedIn, iMessage, Slack) */}
+        <meta property="og:site_name" content="Cairn" />
         <meta property="og:title" content="Cairn — AI Career Companion" />
-        <meta
-          property="og:description"
-          content="Goal-first AI career coach. Pick a specialist, get a path, not a chatbot."
-        />
+        <meta property="og:description" content={DEFAULT_DESCRIPTION} />
         <meta property="og:type" content="website" />
+        <meta property="og:url" content={SITE_URL} />
+        <meta property="og:image" content={`${SITE_URL}/assets/og.png`} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:locale" content="en_US" />
+
+        {/* Twitter / X */}
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Cairn — AI Career Companion" />
+        <meta name="twitter:description" content={DEFAULT_DESCRIPTION} />
+        <meta name="twitter:image" content={`${SITE_URL}/assets/og.png`} />
+
+        {/* Search engine hints */}
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta name="googlebot" content="index, follow" />
+
+        {/* JSON-LD structured data — improves rich-result eligibility */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(ORG_JSONLD) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(APP_JSONLD) }}
+        />
 
         <ScrollViewStyleReset />
 
-        {/* Inline SW registration. Wrapped in try so any registration
-            failure (e.g. dev HMR, unsupported browser) is non-fatal. */}
+        {/* SW registration + beforeinstallprompt capture. Wrapped in try
+            so any failure (dev HMR, unsupported browser) is non-fatal. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -54,9 +118,6 @@ export default function Root({ children }: PropsWithChildren) {
                   navigator.serviceWorker.register('/sw.js').catch(() => {});
                 });
               }
-              // Capture the install prompt so the React-side hook can fire it
-              // on demand. Without this, the event would fire and be lost
-              // before any component had a chance to listen.
               window.__deferredInstallPrompt = null;
               window.addEventListener('beforeinstallprompt', (e) => {
                 e.preventDefault();

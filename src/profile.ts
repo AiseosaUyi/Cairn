@@ -130,15 +130,16 @@ async function deleteRaw(): Promise<void> {
   }
 }
 
-let cache: Profile | null = null;
+// Dual-mode cache: keyed by user id ('guest' when not signed in). When
+// the user signs in or out, the key changes → cache misses → fresh read
+// from the right source. No subscription needed.
+let cache: { uid: string | 'guest'; data: Profile } | null = null;
 
-export async function getProfile(): Promise<Profile> {
-  if (cache) return cache;
-  let loaded: Profile;
+async function loadLocal(): Promise<Profile> {
   try {
     const raw = await readRaw();
     const parsed = raw ? JSON.parse(raw) : null;
-    loaded = parsed
+    return parsed
       ? {
           ...empty,
           ...parsed,
@@ -146,23 +147,55 @@ export async function getProfile(): Promise<Profile> {
         }
       : { ...empty };
   } catch {
-    loaded = { ...empty };
+    return { ...empty };
   }
-  cache = loaded;
-  return loaded;
+}
+
+export async function getProfile(): Promise<Profile> {
+  // Lazy import to avoid a hard dep on Supabase when env isn't set.
+  const { currentUserId, cloudGetProfile } = await import('@/data/sync');
+  const uid = (await currentUserId()) ?? 'guest';
+  if (cache && cache.uid === uid) return cache.data;
+
+  let data: Profile;
+  if (uid === 'guest') {
+    data = await loadLocal();
+  } else {
+    // Pass local profile so the sync layer can migrate on first sign-in.
+    const local = await loadLocal();
+    const remote = await cloudGetProfile(uid, local);
+    data = remote ?? local;
+  }
+  cache = { uid, data };
+  return data;
 }
 
 export async function setProfile(patch: Partial<Profile>): Promise<Profile> {
+  const { currentUserId, cloudSaveProfile } = await import('@/data/sync');
+  const uid = (await currentUserId()) ?? 'guest';
   const next = { ...(await getProfile()), ...patch };
-  cache = next;
+  cache = { uid, data: next };
+  // Always keep the local mirror in sync — offline reads + sign-out
+  // need it. Cloud write is a no-op when guest.
   await writeRaw(JSON.stringify(next));
+  if (uid !== 'guest') {
+    await cloudSaveProfile(uid, next);
+  }
   return next;
 }
 
-/** Account/data deletion (Apple 5.1.1(v) / Play data-deletion). Irreversible. */
+/** Account/data deletion (Apple 5.1.1(v) / Play data-deletion). Irreversible.
+ *  Clears local. For cloud deletion, the user must also delete their
+ *  auth row (separate flow — Supabase admin API). */
 export async function wipeProfile(): Promise<void> {
   cache = null;
   await deleteRaw();
+}
+
+/** Drop the in-memory cache. Call after sign-in/sign-out to force the
+ *  next getProfile() to re-read from the now-correct source. */
+export function resetProfileCache(): void {
+  cache = null;
 }
 
 export function resolveCoachName(p: Profile, mode: Mode): string | null {

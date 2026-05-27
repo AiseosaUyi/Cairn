@@ -38,6 +38,8 @@ export interface Phase {
   status: 'upcoming' | 'in_progress' | 'done';
 }
 
+export type GoalStatus = 'active' | 'archived' | 'completed';
+
 export interface Goal {
   id: string;
   /** The stated goal in the user's own words. */
@@ -50,6 +52,11 @@ export interface Goal {
   horizon: string;
   /** ISO date when the goal was set. */
   startedAt: string;
+  /** ISO date when the goal was archived/completed — null while active. */
+  endedAt: string | null;
+  /** One-active-goal invariant: only one Goal can have status='active'
+   *  at a time. Switching active goals archives the previous one. */
+  status: GoalStatus;
   phases: Phase[];
 }
 
@@ -84,6 +91,8 @@ const mockGoal: Goal = {
     'Currently PM at a 30-person seed-stage company, 4 years total PM experience, strongest in 0→1 work. Want sharper interview answers, a stronger portfolio, and a warm pipeline.',
   horizon: '12 weeks',
   startedAt: daysAgo(11),
+  endedAt: null,
+  status: 'active',
   phases: [
     {
       id: 'p_1',
@@ -194,15 +203,104 @@ const mockGoal: Goal = {
   ],
 };
 
-// In-memory store — swap for real persistence later.
+// Dual-mode store: in-memory cache keyed by user id ('guest' when not
+// signed in). On sign-in/out the uid key changes → cache invalidates →
+// next read pulls from the right source (Supabase or local-only).
 let _goals: Goal[] = [];
+let _goalsUid: string | 'guest' | null = null;
+
+async function ensureLoaded(): Promise<void> {
+  const { currentUserId, cloudListGoals } = await import('@/data/sync');
+  const uid = (await currentUserId()) ?? 'guest';
+  if (_goalsUid === uid) return;
+
+  if (uid === 'guest') {
+    // Guest mode: keep whatever's in _goals (createGoal populates it
+    // locally; nothing else persists for guests in v1). If we were
+    // previously signed in, drop the cloud-fetched goals — guest can't
+    // see them.
+    if (_goalsUid !== null && _goalsUid !== 'guest') _goals = [];
+  } else {
+    // Signed in: pull from cloud, passing current local goals so the
+    // sync layer can migrate them up on first sign-in if cloud is empty.
+    _goals = await cloudListGoals(uid, _goals);
+  }
+  _goalsUid = uid;
+}
 
 export async function listGoals(): Promise<Goal[]> {
+  await ensureLoaded();
   return _goals;
 }
 
+/** The single active goal — null if no goal is locked in. Enforces the
+ *  one-active-goal invariant: never returns more than one. */
 export async function getActiveGoal(): Promise<Goal | null> {
-  return _goals[0] ?? null;
+  await ensureLoaded();
+  return _goals.find((g) => g.status === 'active') ?? null;
+}
+
+export async function listArchivedGoals(): Promise<Goal[]> {
+  await ensureLoaded();
+  return _goals.filter((g) => g.status !== 'active');
+}
+
+/** Drop the in-memory cache. Auth-state change hooks call this so the
+ *  next read pulls from the now-correct source. */
+export function resetGoalsCache(): void {
+  _goals = [];
+  _goalsUid = null;
+}
+
+/** Push a goal to cloud (if signed in) and return the possibly-rewritten
+ *  version (cloud may have assigned a UUID id). No-op when guest. */
+async function syncGoal(g: Goal): Promise<Goal> {
+  const { currentUserId, cloudUpsertGoal } = await import('@/data/sync');
+  const uid = await currentUserId();
+  if (!uid) return g;
+  const saved = await cloudUpsertGoal(uid, g);
+  return saved ?? g;
+}
+
+/** Archive the current active goal (if any). Returns the archived id. */
+export async function archiveActiveGoal(reason: 'replaced' | 'completed' | 'abandoned' = 'replaced'): Promise<string | null> {
+  await ensureLoaded();
+  const active = _goals.find((g) => g.status === 'active');
+  if (!active) return null;
+  active.status = reason === 'completed' ? 'completed' : 'archived';
+  active.endedAt = new Date().toISOString().slice(0, 10);
+  await syncGoal(active);
+  return active.id;
+}
+
+/** Merge new context into the active goal. Optionally regenerate phases
+ *  AFTER the currently-in-progress phase (don't destroy past work). */
+export async function updateActiveGoal(patch: {
+  title?: string;
+  contextAppend?: string;
+  horizon?: string;
+  intent?: GoalIntent;
+}): Promise<Goal | null> {
+  await ensureLoaded();
+  const active = _goals.find((g) => g.status === 'active');
+  if (!active) return null;
+  if (patch.title) active.title = patch.title;
+  if (patch.horizon) active.horizon = patch.horizon;
+  if (patch.contextAppend) {
+    active.context = active.context
+      ? `${active.context}\n\n${patch.contextAppend}`
+      : patch.contextAppend;
+  }
+  if (patch.intent) {
+    // Regenerate ONLY the phases beyond the current in-progress one.
+    // Completed/in-progress phases stay intact so past work isn't lost.
+    const lockedIdx = active.phases.findIndex((p) => p.status === 'in_progress');
+    const keep = lockedIdx >= 0 ? active.phases.slice(0, lockedIdx + 1) : [];
+    const fresh = INTENT_TEMPLATES[patch.intent]();
+    active.phases = [...keep, ...fresh.slice(keep.length)];
+  }
+  await syncGoal(active);
+  return active;
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +534,10 @@ export async function createGoal(input: {
   const intent: GoalIntent = input.intent ?? inferIntent(input.title);
   const phases = fromLLM ?? INTENT_TEMPLATES[intent]();
 
+  // Enforce one-active-goal: archive whatever's currently active before
+  // adding the new one. Past goals stay visible in the archived list.
+  await archiveActiveGoal('replaced');
+
   const goal: Goal = {
     id: `g_${Math.random().toString(36).slice(2, 10)}`,
     title: input.title,
@@ -443,10 +545,167 @@ export async function createGoal(input: {
     context,
     horizon,
     startedAt: new Date().toISOString().slice(0, 10),
+    endedAt: null,
+    status: 'active',
     phases,
   };
   _goals = [goal, ..._goals];
+  // Sync — replaces our local random id with the cloud-generated UUID
+  // when signed in, so subsequent updates reference the right row.
+  const synced = await syncGoal(goal);
+  if (synced.id !== goal.id) {
+    goal.id = synced.id;
+  }
   return goal;
+}
+
+// ---------------------------------------------------------------------------
+// Agentic goal proposal — the agent ITSELF detects when a conversation has
+// reached enough specificity to lock as a goal, and emits a structured
+// block at the end of its reply. We parse + surface it as an inline chip.
+//
+// See playbook.ts for the prompt instruction and turn.ts for the parser.
+// ---------------------------------------------------------------------------
+
+export type ProposalFraming = 'create' | 'update' | 'replace';
+
+export interface GoalProposal {
+  title: string;
+  intent: GoalIntent;
+  context: string;
+  horizon: string;
+  framing: ProposalFraming;
+}
+
+// ---------------------------------------------------------------------------
+// Path-update operations — agent-driven fine-grained mutations on the
+// active goal's phases + tasks. The agent emits a `path-update` block
+// with a list of operations + a rationale; user accepts via a chip;
+// these functions apply them.
+// ---------------------------------------------------------------------------
+
+export type PathOp =
+  | { kind: 'add-task'; phaseId: string; title: string; why?: string; effort?: string; dueOn?: string }
+  | { kind: 'complete-task'; taskId: string }
+  | { kind: 'skip-task'; taskId: string }
+  | { kind: 'remove-task'; taskId: string }
+  | { kind: 'reschedule-task'; taskId: string; dueOn: string }
+  | { kind: 'rename-phase'; phaseId: string; title: string }
+  | { kind: 'reorder-tasks'; phaseId: string; taskIds: string[] };
+
+export interface PathUpdate {
+  rationale: string;
+  operations: PathOp[];
+}
+
+/** Apply a list of path operations to the active goal. Returns the
+ *  updated goal (or null if no active goal). Each op is best-effort
+ *  silent: if a target id doesn't exist, that op is skipped. */
+export async function applyPathUpdate(update: PathUpdate): Promise<Goal | null> {
+  await ensureLoaded();
+  const active = _goals.find((g) => g.status === 'active');
+  if (!active) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const findPhase = (pid: string) => active.phases.find((p) => p.id === pid);
+  const findTaskAndPhase = (tid: string) => {
+    for (const p of active.phases) {
+      const t = p.tasks.find((x) => x.id === tid);
+      if (t) return { phase: p, task: t };
+    }
+    return null;
+  };
+
+  for (const op of update.operations) {
+    switch (op.kind) {
+      case 'add-task': {
+        const phase = findPhase(op.phaseId);
+        if (!phase) break;
+        phase.tasks.push({
+          id: `t_${Math.random().toString(36).slice(2, 9)}`,
+          title: op.title,
+          why: op.why,
+          effort: op.effort,
+          status: 'todo',
+          dueOn: op.dueOn ?? today,
+        });
+        break;
+      }
+      case 'complete-task': {
+        const found = findTaskAndPhase(op.taskId);
+        if (found) found.task.status = 'done';
+        break;
+      }
+      case 'skip-task': {
+        const found = findTaskAndPhase(op.taskId);
+        if (found) found.task.status = 'skipped';
+        break;
+      }
+      case 'remove-task': {
+        for (const p of active.phases) {
+          const idx = p.tasks.findIndex((t) => t.id === op.taskId);
+          if (idx >= 0) {
+            p.tasks.splice(idx, 1);
+            break;
+          }
+        }
+        break;
+      }
+      case 'reschedule-task': {
+        const found = findTaskAndPhase(op.taskId);
+        if (found) found.task.dueOn = op.dueOn;
+        break;
+      }
+      case 'rename-phase': {
+        const phase = findPhase(op.phaseId);
+        if (phase) phase.title = op.title;
+        break;
+      }
+      case 'reorder-tasks': {
+        const phase = findPhase(op.phaseId);
+        if (!phase) break;
+        const reordered = op.taskIds
+          .map((id) => phase.tasks.find((t) => t.id === id))
+          .filter((t): t is Task => !!t);
+        const remaining = phase.tasks.filter((t) => !op.taskIds.includes(t.id));
+        phase.tasks = [...reordered, ...remaining];
+        break;
+      }
+    }
+  }
+
+  // Re-derive each phase's status from its tasks.
+  for (const phase of active.phases) {
+    const allResolved = phase.tasks.length > 0 && phase.tasks.every((t) => t.status !== 'todo');
+    const anyDone = phase.tasks.some((t) => t.status === 'done');
+    if (allResolved) phase.status = 'done';
+    else if (anyDone) phase.status = 'in_progress';
+  }
+
+  await syncGoal(active);
+  return active;
+}
+
+/** Apply a user-accepted goal proposal. Routes to create / update /
+ *  replace based on the framing the agent picked. */
+export async function acceptProposal(p: GoalProposal): Promise<Goal> {
+  if (p.framing === 'update') {
+    const updated = await updateActiveGoal({
+      title: p.title,
+      contextAppend: p.context,
+      horizon: p.horizon,
+      intent: p.intent,
+    });
+    if (updated) return updated;
+    // Fallthrough: no active goal → create instead.
+  }
+  // 'create' (no active goal) and 'replace' (auto-archives via createGoal)
+  // share the same implementation.
+  return createGoal({
+    title: p.title,
+    context: p.context,
+    horizon: p.horizon,
+    intent: p.intent,
+  });
 }
 
 /** Intent-specific reframings — sharper than the generic
