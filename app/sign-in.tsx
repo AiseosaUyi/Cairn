@@ -124,7 +124,7 @@ function Inner() {
             label="Email"
             value={email}
             onChangeText={setEmail}
-            placeholder="you@example.com"
+            placeholder="Enter your email address"
             autoCapitalize="none"
             keyboardType="email-address"
             autoComplete="email"
@@ -134,7 +134,7 @@ function Inner() {
             label="Password"
             value={password}
             onChangeText={setPassword}
-            placeholder="Your password"
+            placeholder="Enter your password"
             autoComplete="current-password"
             textContentType="password"
           />

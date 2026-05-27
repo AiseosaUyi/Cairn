@@ -186,7 +186,7 @@ function Inner() {
             label="Full name"
             value={fullName}
             onChangeText={setFullName}
-            placeholder="Jane Doe"
+            placeholder="Enter your full name"
             autoCapitalize="words"
             autoComplete="name"
             textContentType="name"
@@ -195,7 +195,7 @@ function Inner() {
             label="Email"
             value={email}
             onChangeText={setEmail}
-            placeholder="you@example.com"
+            placeholder="Enter your email address"
             autoCapitalize="none"
             keyboardType="email-address"
             autoComplete="email"
@@ -205,10 +205,10 @@ function Inner() {
             label="Password"
             value={password}
             onChangeText={setPassword}
-            placeholder="Min 8 characters"
+            placeholder="Create a password"
             autoComplete="new-password"
             textContentType="newPassword"
-            hint="At least 8 characters. Mix in something unguessable."
+            hint="At least 8 characters."
           />
 
           <ConsentCheckbox

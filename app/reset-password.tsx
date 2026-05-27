@@ -156,7 +156,7 @@ function Inner() {
             label="New password"
             value={password}
             onChangeText={setPassword}
-            placeholder="Min 8 characters"
+            placeholder="Enter new password"
             autoComplete="new-password"
             textContentType="newPassword"
           />
@@ -164,7 +164,7 @@ function Inner() {
             label="Confirm new password"
             value={confirm}
             onChangeText={setConfirm}
-            placeholder="Same again"
+            placeholder="Re-enter new password"
             autoComplete="new-password"
             textContentType="newPassword"
           />
