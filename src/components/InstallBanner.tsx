@@ -203,36 +203,41 @@ export function InstallBannerInner() {
   const { device, isStandalone, canPromptInstall, promptInstall } = usePWAState();
   const { dismissed, dismiss } = useDismissed('banner');
   const [showInstructions, setShowInstructions] = useState(false);
+  // When the user taps Install on Android but Chrome hasn't fired
+  // beforeinstallprompt yet, we flash an inline hint for ~6 seconds.
+  // `notReadyTick` is the timestamp of the last failed tap; the
+  // subtitle reads "Browse for a moment…" while it's within the window.
+  const [notReadyTick, setNotReadyTick] = useState<number>(0);
+  const isShowingNotReady = notReadyTick > 0 && Date.now() - notReadyTick < 6000;
 
   if (Platform.OS !== 'web') return null;
   if (isStandalone) return null;
   if (device === 'desktop' || device === 'native') return null;
   if (dismissed) return null;
-  // Android: only surface the banner when Chrome is actually ready to
-  // fire the native install dialog (`beforeinstallprompt` captured).
-  // Founder feedback was that tapping install when Chrome wasn't ready
-  // showed a manual walkthrough — "browser shortcut" energy — when they
-  // wanted the real OS install prompt (like FounderOS / other PWAs do).
-  // Hiding the banner until canPromptInstall=true guarantees that EVERY
-  // tap on Install lands in the native OS dialog. The banner appears
-  // automatically when Chrome's engagement heuristic fires the event
-  // (typically after a few seconds of page interaction).
-  if (device === 'mobile-android' && !canPromptInstall) return null;
 
   const onInstallTap = async () => {
     if (canPromptInstall) {
+      // Android Chrome with beforeinstallprompt captured → native dialog.
       const outcome = await promptInstall();
       if (outcome === 'accepted' || outcome === 'dismissed') dismiss();
       return;
     }
-    // iOS only path — Apple doesn't support programmatic install, so
-    // the Share-menu walkthrough is the only option. Android never
-    // reaches this branch (gated above).
-    setShowInstructions(true);
+    if (device === 'mobile-ios') {
+      // iOS has no programmatic install path; show the brand sheet
+      // (one card, not a walkthrough).
+      setShowInstructions(true);
+      return;
+    }
+    // Android Chrome but the install event hasn't fired yet. Don't
+    // open a guide — surface a brief inline hint by flipping the
+    // banner subtitle to "Browse for a moment…" for a few seconds,
+    // then revert. User can tap again once Chrome marks installable.
+    setNotReadyTick(Date.now());
   };
 
-  const subtitle =
-    device === 'mobile-ios'
+  const subtitle = isShowingNotReady
+    ? 'Browse for a moment, then tap again'
+    : device === 'mobile-ios'
       ? 'A real app on your home screen'
       : canPromptInstall
         ? 'One tap, full-screen, works offline'
