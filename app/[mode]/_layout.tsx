@@ -175,6 +175,7 @@ export default function ModeLayout() {
           <Tabs.Screen name="checkin" options={{ href: null }} />
           <Tabs.Screen name="garden" options={{ href: null }} />
           <Tabs.Screen name="setup" options={{ href: null }} />
+          <Tabs.Screen name="task/[id]" options={{ href: null }} />
         </Tabs>
         <FloatingTabBar mode={mode as Mode} />
       </View>

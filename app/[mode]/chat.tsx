@@ -37,6 +37,7 @@ import { runTurn } from '@/companion/turn';
 import {
   acceptProposal,
   applyPathUpdate,
+  findTask,
   getActiveGoal,
   type Goal,
   type GoalProposal,
@@ -566,7 +567,7 @@ function Composer({
 // Root
 // ---------------------------------------------------------------------------
 export default function Chat() {
-  const { mode, preset } = useLocalSearchParams<{ mode: Mode; preset?: string }>();
+  const { mode, preset, taskId } = useLocalSearchParams<{ mode: Mode; preset?: string; taskId?: string }>();
   const { colors } = useTheme();
 
   const [lines, setLines] = useState<Line[]>([]);
@@ -675,7 +676,39 @@ export default function Chat() {
       const g = await getActiveGoal();
       setActiveGoal(g);
       if (!started.current) {
-        if (preset === 'clarity') {
+        if (taskId) {
+          started.current = true;
+          // Task-scoped chat: open with a companion greeting that names
+          // the task. The agent already gets goal context via the
+          // playbook; the task title in the greeting is enough to anchor
+          // the conversation. Real per-task system-prompt injection is a
+          // follow-up if this surface gets heavy use.
+          const found = await findTask(taskId);
+          if (found) {
+            const greeting = found.task.why
+              ? `Let's work on "${found.task.title}". ${found.task.why} What's your first cut?`
+              : `Let's work on "${found.task.title}". What's your first cut?`;
+            setLines([
+              {
+                who: 'companion',
+                text: greeting,
+                suggestions: [
+                  "I don't know where to start",
+                  "Show me what good looks like",
+                  "I have a rough draft — react to it",
+                  "What questions should I be asking myself?",
+                ],
+              },
+            ]);
+          } else {
+            setLines([
+              {
+                who: 'companion',
+                text: `That task wasn't found — it may have been removed. Want to talk through something else?`,
+              },
+            ]);
+          }
+        } else if (preset === 'clarity') {
           started.current = true;
           say(CLARITY_PRESET);
         } else if (preset === 'adjust-path') {
@@ -709,7 +742,7 @@ export default function Chat() {
         }
       }
     })();
-  }, [mode, preset, say]);
+  }, [mode, preset, taskId, say]);
 
   // Real recording — useVoiceRecorder() handles MediaRecorder + Whisper.
   // On stop+send: transcript drops straight into the conversation as a

@@ -514,29 +514,31 @@ export function TaskRow({
   caption,
   done,
   onToggle,
+  onOpen,
   frozen = false,
 }: {
   label: string;
   caption?: string;
   done: boolean;
   onToggle: () => void;
+  /** When provided, tapping the body of the row opens the workspace
+   *  (the checkbox still toggles done). When omitted, the whole row
+   *  toggles — preserves the old behavior for callers that haven't
+   *  wired the workspace yet. */
+  onOpen?: () => void;
   frozen?: boolean;
 }) {
   const { colors } = useTheme();
   const reduce = useReducedMotion();
   const skipMotion = frozen || reduce;
-  return (
+  const checkbox = (
     <Pressable
       accessibilityRole="checkbox"
       accessibilityState={{ checked: done }}
-      accessibilityLabel={label}
+      accessibilityLabel={`Mark ${label} ${done ? 'todo' : 'done'}`}
       onPress={onToggle}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: space.sm,
-        paddingVertical: space.sm,
-      }}
+      hitSlop={10}
+      style={{ marginTop: 2 }}
     >
       <MotiView
         animate={{
@@ -552,27 +554,73 @@ export function TaskRow({
           borderWidth: 1.25,
           alignItems: 'center',
           justifyContent: 'center',
-          marginTop: 2,
         }}
       >
         {done && <Check size={14} color="#FFFFFF" strokeWidth={2.5} />}
       </MotiView>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text
-          variant="body"
-          style={{
-            textDecorationLine: done ? 'line-through' : 'none',
-            color: done ? colors.inkSoft : colors.ink,
-          }}
-        >
-          {label}
+    </Pressable>
+  );
+
+  const body = (
+    <View style={{ flex: 1, gap: 2 }}>
+      <Text
+        variant="body"
+        style={{
+          textDecorationLine: done ? 'line-through' : 'none',
+          color: done ? colors.inkSoft : colors.ink,
+        }}
+      >
+        {label}
+      </Text>
+      {caption ? (
+        <Text variant="caption" soft>
+          {caption}
         </Text>
-        {caption ? (
-          <Text variant="caption" soft>
-            {caption}
-          </Text>
-        ) : null}
+      ) : null}
+    </View>
+  );
+
+  // If onOpen is provided we render two side-by-side Pressables — checkbox
+  // toggles, body opens. Otherwise the whole row is one Pressable that
+  // toggles (back-compat for callers that haven't wired the workspace).
+  if (onOpen) {
+    return (
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: space.sm,
+          paddingVertical: space.sm,
+        }}
+      >
+        {checkbox}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open workspace for ${label}`}
+          onPress={onOpen}
+          style={{ flex: 1 }}
+        >
+          {body}
+        </Pressable>
       </View>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: done }}
+      accessibilityLabel={label}
+      onPress={onToggle}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: space.sm,
+        paddingVertical: space.sm,
+      }}
+    >
+      {checkbox}
+      {body}
     </Pressable>
   );
 }

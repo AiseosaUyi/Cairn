@@ -14,6 +14,33 @@
 
 export type TaskStatus = 'todo' | 'done' | 'skipped';
 
+/**
+ * Task "kind" — drives which Workspace affordances are relevant.
+ *
+ *   write    → produce a written artifact. Workspace shows Template +
+ *              Examples + Review tabs. Most "draft / outline / list"
+ *              tasks land here.
+ *   review   → review external work (own portfolio, resume, LinkedIn,
+ *              draft). Workspace shows Submit URL/Paste + Review tab.
+ *   research → external research task. Workspace shows Examples +
+ *              capture notes.
+ *   outreach → write + send. Workspace shows Template (DM/email
+ *              scripts) + Review.
+ *   reflect  → introspection task. Workspace shows Coach (per-task
+ *              chat) + capture notes.
+ *   schedule → calendar block / time-protect. Workspace shows
+ *              .ics download + Coach.
+ *   do       → catch-all. Workspace shows Coach only.
+ */
+export type TaskKind =
+  | 'write'
+  | 'review'
+  | 'research'
+  | 'outreach'
+  | 'reflect'
+  | 'schedule'
+  | 'do';
+
 export interface Task {
   id: string;
   title: string;
@@ -24,6 +51,8 @@ export interface Task {
   status: TaskStatus;
   /** ISO date the task is scheduled for. */
   dueOn: string;
+  /** Drives which Task Workspace affordances appear. Defaults to 'do'. */
+  kind?: TaskKind;
 }
 
 export interface Phase {
@@ -206,8 +235,81 @@ const mockGoal: Goal = {
 // Dual-mode store: in-memory cache keyed by user id ('guest' when not
 // signed in). On sign-in/out the uid key changes → cache invalidates →
 // next read pulls from the right source (Supabase or local-only).
+//
+// Guest persistence: instead of evaporating on browser refresh, guest
+// goals are mirrored to localStorage under GUEST_KEY. The first
+// ensureLoaded() rehydrates from there. Any mutation writes back.
+// This was the source of "refresh wipes my progress" complaints.
 let _goals: Goal[] = [];
 let _goalsUid: string | 'guest' | null = null;
+
+const GUEST_KEY = 'cairn.guest.goals.v1';
+
+function readGuest(): Goal[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(GUEST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Goal[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeGuest(goals: Goal[]): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(GUEST_KEY, JSON.stringify(goals));
+  } catch {
+    /* quota / private mode / SSR — silently ignore */
+  }
+}
+
+/** Persist the local cache for guest users. Called after every mutation
+ *  so a refresh resumes where the user left off. */
+function persistGuestIfNeeded(): void {
+  if (_goalsUid === 'guest') writeGuest(_goals);
+}
+
+/** Reconcile phase statuses against task statuses. Catches drift from:
+ *    - older saved state (predating activateNextPhase)
+ *    - manual edits in another session
+ *    - any state that says "phase 1 done, phase 2 upcoming" but should
+ *      have phase 2 promoted to in_progress
+ *  Idempotent — safe to run on every load. */
+function repairGoalPhases(goal: Goal): boolean {
+  let changed = false;
+  for (let i = 0; i < goal.phases.length; i++) {
+    const phase = goal.phases[i];
+    if (phase.tasks.length > 0) {
+      const allResolved = phase.tasks.every((t) => t.status !== 'todo');
+      const anyDone = phase.tasks.some((t) => t.status === 'done');
+      const target = allResolved ? 'done' : anyDone ? 'in_progress' : phase.status;
+      if (phase.status !== target) {
+        phase.status = target;
+        changed = true;
+      }
+    }
+    // If this phase is done and the next is still upcoming, promote it.
+    if (phase.status === 'done') {
+      const next = goal.phases[i + 1];
+      if (next && next.status === 'upcoming') {
+        next.status = 'in_progress';
+        const todayStr = today();
+        if (next.tasks.length === 0) {
+          next.tasks = starterTasksFor(next);
+        } else {
+          for (const t of next.tasks) {
+            if (t.status === 'todo' && t.dueOn > todayStr) t.dueOn = todayStr;
+          }
+        }
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
 
 async function ensureLoaded(): Promise<void> {
   const { currentUserId, cloudListGoals } = await import('@/data/sync');
@@ -215,16 +317,32 @@ async function ensureLoaded(): Promise<void> {
   if (_goalsUid === uid) return;
 
   if (uid === 'guest') {
-    // Guest mode: keep whatever's in _goals (createGoal populates it
-    // locally; nothing else persists for guests in v1). If we were
-    // previously signed in, drop the cloud-fetched goals — guest can't
-    // see them.
+    // Guest mode: rehydrate from localStorage so a refresh doesn't wipe.
+    // When transitioning from signed-in → guest, drop cloud goals first.
     if (_goalsUid !== null && _goalsUid !== 'guest') _goals = [];
+    if (_goals.length === 0) _goals = readGuest();
   } else {
     // Signed in: pull from cloud, passing current local goals so the
     // sync layer can migrate them up on first sign-in if cloud is empty.
     _goals = await cloudListGoals(uid, _goals);
   }
+
+  // Reconciliation: catch any stale phase status from saved state.
+  let repairs = 0;
+  for (const g of _goals) {
+    if (repairGoalPhases(g)) repairs += 1;
+  }
+  if (repairs > 0) {
+    if (uid === 'guest') {
+      writeGuest(_goals);
+    } else {
+      // Push repaired goals back to cloud so the fix sticks across
+      // devices. Best-effort — failures are non-fatal.
+      const { cloudUpsertGoal } = await import('@/data/sync');
+      for (const g of _goals) await cloudUpsertGoal(uid, g).catch(() => null);
+    }
+  }
+
   _goalsUid = uid;
 }
 
@@ -252,12 +370,17 @@ export function resetGoalsCache(): void {
   _goalsUid = null;
 }
 
-/** Push a goal to cloud (if signed in) and return the possibly-rewritten
- *  version (cloud may have assigned a UUID id). No-op when guest. */
+/** Push a goal to cloud (if signed in) OR localStorage (if guest) and
+ *  return the possibly-rewritten version (cloud may assign a UUID).
+ *  Every mutation routes through here, so this is the single chokepoint
+ *  that keeps persistence honest. */
 async function syncGoal(g: Goal): Promise<Goal> {
   const { currentUserId, cloudUpsertGoal } = await import('@/data/sync');
   const uid = await currentUserId();
-  if (!uid) return g;
+  if (!uid) {
+    persistGuestIfNeeded();
+    return g;
+  }
   const saved = await cloudUpsertGoal(uid, g);
   return saved ?? g;
 }
@@ -376,112 +499,230 @@ function inferIntent(title: string): GoalIntent {
 }
 
 /** Intent-keyed templates. Each returns the full 4-phase shape with
- *  first-week tasks. Outcome statements and tasks are written for the
- *  specific moment the intent describes — that's the whole point. */
+ *  TASKS PER PHASE — phases 2-4 are no longer empty stubs. Each task is
+ *  tagged with a `kind` so the Workspace shows the right tools.
+ *
+ *  Phase-1 tasks get dueOn=today; later phases get future dueOn dates
+ *  that the activation logic in setTaskStatus pulls to today when the
+ *  phase is reached, so the user is never staring at "due in 3 weeks". */
 const INTENT_TEMPLATES: Record<GoalIntent, () => Phase[]> = {
   'land-senior': () => [
     p1('Sharpen the story', 'Weeks 1–2', 'A senior-grade narrative of your last two years that holds up under hostile questions.', [
-      task('Draft three project deep-dives in STAR format', 'Most senior interviews lean hard on past-project depth.', '90 min', today()),
-      task('List the five hostile questions you fear most — write the answers', 'Pre-answering kills the freeze.', '45 min', today()),
-      task('Rewrite LinkedIn headline + About to lead with the strongest project', undefined, '30 min', daysFromNow(2)),
+      task('Draft three project deep-dives in STAR format', 'Most senior interviews lean hard on past-project depth.', '90 min', today(), 'write'),
+      task('List the five hostile questions you fear most — write the answers', 'Pre-answering kills the freeze.', '45 min', today(), 'write'),
+      task('Rewrite LinkedIn headline + About to lead with the strongest project', 'Recruiters scan headline first; treat it as the hook.', '30 min', daysFromNow(2), 'write'),
     ]),
-    upcoming('Portfolio — show, not tell', 'Weeks 3–5', 'Three case studies that prove judgment, not polish.'),
-    upcoming('Pipeline — warm intros, not cold applies', 'Weeks 6–9', 'Five real conversations sourced through people who already vouch for you.'),
-    upcoming('Close — convert conversations to offers', 'Weeks 10–12', 'Two competing offers and the leverage to negotiate the one you actually want.'),
+    upcoming('Portfolio — show, not tell', 'Weeks 3–5', 'Three case studies that prove judgment, not polish.', [
+      task('Pick the three strongest case studies (judgment > polish)', 'Senior reviewers want to see how you decide, not how you Figma.', '30 min', daysFromNow(14), 'reflect'),
+      task('Outline case #1: the metric, the bet, the result, the regret', 'Naming the regret is the senior move.', '60 min', daysFromNow(15), 'write'),
+      task('Send the outline to two senior people for hostile feedback', 'A friendly read tells you nothing.', '15 min', daysFromNow(17), 'outreach'),
+      task('Have your portfolio reviewed', 'Specific score across senior dimensions beats vibes feedback.', '30 min', daysFromNow(20), 'review'),
+    ]),
+    upcoming('Pipeline — warm intros, not cold applies', 'Weeks 6–9', 'Five real conversations sourced through people who already vouch for you.', [
+      task('Build a target list of 20 Series B/C companies that fit', 'Casting wide-and-shallow is the cold-apply trap. Pick few; pick well.', '60 min', daysFromNow(35), 'research'),
+      task('For each: identify one person in your second-degree network', 'Cold pitches lose. Warm intros win.', '90 min', daysFromNow(38), 'research'),
+      task('Send 10 personalised outreach DMs this week', 'Templates are starting points; personalisation is the signal.', '60 min', daysFromNow(42), 'outreach'),
+    ]),
+    upcoming('Close — convert conversations to offers', 'Weeks 10–12', 'Two competing offers and the leverage to negotiate the one you actually want.', [
+      task('Drill answers to the three offers you most expect', 'You will be asked all three; have the answer rehearsed.', '60 min', daysFromNow(65), 'reflect'),
+      task('Decide your walk-away number, target, and dream number', 'Going in without these is going in unarmed.', '30 min', daysFromNow(68), 'reflect'),
+      task('Write the post-offer reply template (gratitude + question + delay)', 'Never accept on the call. Buy 24 hours.', '20 min', daysFromNow(70), 'write'),
+    ]),
   ],
   'get-promo': () => [
     p1('Audit your last 12 months', 'Weeks 1–2', 'A receipts-based read of your impact, scope, and the bar at the next level.', [
-      task("Pull every win, metric, and 'thing that wouldn't exist without you'", 'Promo cases live or die on receipts.', '90 min', today()),
-      task('Read your company\'s next-level rubric line by line', 'Most people argue their level without knowing the actual bar.', '45 min', today()),
-      task('Identify two scope expansions you could make in the next 8 weeks', undefined, '30 min', daysFromNow(2)),
+      task("Pull every win, metric, and 'thing that wouldn't exist without you'", 'Promo cases live or die on receipts.', '90 min', today(), 'write'),
+      task("Read your company's next-level rubric line by line", 'Most people argue their level without knowing the actual bar.', '45 min', today(), 'research'),
+      task('Identify two scope expansions you could make in the next 8 weeks', 'Scope at the next level usually means a new surface — name it.', '30 min', daysFromNow(2), 'reflect'),
     ]),
-    upcoming('Build the case', 'Weeks 3–5', 'A written promo packet good enough that your manager hands it up unchanged.'),
-    upcoming('Stakeholder strategy', 'Weeks 6–8', 'The three people whose support flips this. A plan to earn it.'),
-    upcoming('The conversation', 'Weeks 9–12', 'Promo conversation, then the follow-through to get it signed.'),
+    upcoming('Build the case', 'Weeks 3–5', 'A written promo packet good enough that your manager hands it up unchanged.', [
+      task('Draft the promo packet — receipts, scope, level rubric mapped', 'The packet IS the case. Your manager should be able to forward it untouched.', '120 min', daysFromNow(14), 'write'),
+      task('Have your packet reviewed against the rubric', 'Self-scoring overrates. Get an honest read before showing your manager.', '30 min', daysFromNow(18), 'review'),
+      task('Iterate on weak dimensions', 'Two passes is the minimum; three is closer.', '60 min', daysFromNow(21), 'write'),
+    ]),
+    upcoming('Stakeholder strategy', 'Weeks 6–8', 'The three people whose support flips this. A plan to earn it.', [
+      task('Name the three stakeholders whose vote flips this', 'Promo is often political. Pretending otherwise is naive.', '30 min', daysFromNow(35), 'reflect'),
+      task('For each: identify the one thing you could do for them this month', 'Reciprocity beats lobbying.', '45 min', daysFromNow(38), 'research'),
+      task('Draft an outreach message to one mentor about the move', undefined, '20 min', daysFromNow(42), 'outreach'),
+    ]),
+    upcoming('The conversation', 'Weeks 9–12', 'Promo conversation, then the follow-through to get it signed.', [
+      task('Schedule the promo conversation with your manager', "Put it on the calendar — vague is the killer here.", '15 min', daysFromNow(60), 'schedule'),
+      task('Drill the three hardest objections you expect', 'Pre-answer them; do not improvise live.', '45 min', daysFromNow(63), 'reflect'),
+      task('Write the follow-up email recapping the agreement', 'What is not written down does not exist in HR systems.', '30 min', daysFromNow(70), 'write'),
+    ]),
   ],
   negotiate: () => [
     p1('Benchmark', 'Week 1', 'Real market data for your role, level, and geography — not anecdote.', [
-      task('Pull comp data from levels.fyi, Glassdoor, and 2–3 peers in role', 'Vibes lose negotiations. Numbers win them.', '60 min', today()),
-      task('Set three numbers: walk-away, target, dream', 'Going in without these is going in unarmed.', '30 min', today()),
+      task('Pull comp data from levels.fyi, Glassdoor, and 2–3 peers in role', 'Vibes lose negotiations. Numbers win them.', '60 min', today(), 'research'),
+      task('Set three numbers: walk-away, target, dream', 'Going in without these is going in unarmed.', '30 min', today(), 'reflect'),
     ]),
-    upcoming('Counter strategy', 'Week 2', 'Scripts and frames for the three responses they most likely give.'),
-    upcoming('Multi-leverage', 'Weeks 3–4', 'Competing offer, internal pressure, or scope ask — the lever that fits.'),
-    upcoming('Land the close', 'Weeks 5–6', 'Counter delivered, response handled, offer signed at the better number.'),
+    upcoming('Counter strategy', 'Week 2', 'Scripts and frames for the three responses they most likely give.', [
+      task('Draft your three counter scripts (yes / push / silence)', "If they say X, you say Y — written, not improvised.", '60 min', daysFromNow(7), 'write'),
+      task('Have your scripts reviewed for tone + leverage', 'Negotiation tone is a knife-edge; get a second read.', '20 min', daysFromNow(9), 'review'),
+    ]),
+    upcoming('Multi-leverage', 'Weeks 3–4', 'Competing offer, internal pressure, or scope ask — the lever that fits.', [
+      task('Identify the one form of leverage available to you (offer / scope / time)', 'Most people skip this and rely on hope. Hope is not leverage.', '30 min', daysFromNow(14), 'reflect'),
+      task('Make one move that creates that leverage this week', 'Activate intros, ask for the scope expansion, etc.', '45 min', daysFromNow(17), 'outreach'),
+    ]),
+    upcoming('Land the close', 'Weeks 5–6', 'Counter delivered, response handled, offer signed at the better number.', [
+      task('Send the counter (calm, brief, specific)', 'A negotiation email is three lines max.', '20 min', daysFromNow(28), 'outreach'),
+      task('Hold silence after sending — do not chase', "Re-pitching weakens you. Let them respond.", '5 min', daysFromNow(29), 'reflect'),
+      task('Re-read the final letter line by line before signing', 'Signing bonuses, equity, refresh schedule — read all of it.', '30 min', daysFromNow(35), 'review'),
+    ]),
   ],
   switch: () => [
-    p1('Define the destination', 'Weeks 1–2', 'A sharp picture of the role you\'re moving INTO — title, scope, the day-to-day.', [
-      task('Write the JD of your future role from memory', "If you can't write it, you can't aim at it.", '45 min', today()),
-      task('Find five people doing that job today — read their LinkedIns end to end', 'Pattern-match the bridge that worked for them.', '60 min', today()),
-      task('Map the 3–5 skills you\'re missing vs. that role', undefined, '30 min', daysFromNow(2)),
+    p1('Define the destination', 'Weeks 1–2', "A sharp picture of the role you're moving INTO — title, scope, the day-to-day.", [
+      task('Write the JD of your future role from memory', "If you can't write it, you can't aim at it.", '45 min', today(), 'write'),
+      task('Find five people doing that job today — read their LinkedIns end to end', 'Pattern-match the bridge that worked for them.', '60 min', today(), 'research'),
+      task('Map the 3–5 skills you\'re missing vs. that role', undefined, '30 min', daysFromNow(2), 'reflect'),
     ]),
-    upcoming('Build the bridge', 'Weeks 3–6', 'Real projects or proof points that close the gap your background has.'),
-    upcoming('Reposition the narrative', 'Weeks 7–8', "Tell your story as if you've been heading here all along — because now you are."),
-    upcoming('First role in', 'Weeks 9–12', 'A foot in the door — even if it\'s smaller than the dream role. Iterate from there.'),
+    upcoming('Build the bridge', 'Weeks 3–6', 'Real projects or proof points that close the gap your background has.', [
+      task('Pick ONE bridge project that proves the missing skill', 'Switchers get hired on proof, not promise.', '30 min', daysFromNow(14), 'reflect'),
+      task('Draft a public artifact of that work (post, repo, case study)', "Public > private. Hiring managers Google.", '120 min', daysFromNow(20), 'write'),
+      task('Have the artifact reviewed before publishing', 'First drafts read like first drafts. Get a pass.', '20 min', daysFromNow(25), 'review'),
+    ]),
+    upcoming('Reposition the narrative', 'Weeks 7–8', "Tell your story as if you've been heading here all along — because now you are.", [
+      task('Rewrite your About + headline for the new role', "Lead with the destination, not the history.", '45 min', daysFromNow(42), 'write'),
+      task('Have your repositioned LinkedIn reviewed', 'Repositioning is high-leverage; get a senior eye.', '20 min', daysFromNow(46), 'review'),
+    ]),
+    upcoming('First role in', 'Weeks 9–12', "A foot in the door — even if it's smaller than the dream role. Iterate from there.", [
+      task('Target 5 companies that hire from your bridge profile', 'A great fit at one beats a poor fit at five.', '60 min', daysFromNow(60), 'research'),
+      task('Send 10 personalised outreaches with the bridge artifact', undefined, '90 min', daysFromNow(65), 'outreach'),
+    ]),
   ],
   'first-job': () => [
     p1('Make yourself legible', 'Weeks 1–2', 'A presence that the right hiring manager can find and trust.', [
-      task('Pick one project to ship publicly that proves you can do the work', 'Resumes lose to proof.', '120 min', today()),
-      task('Write a one-paragraph "why me" answer to the top question they\'ll ask', undefined, '30 min', today()),
+      task('Pick one project to ship publicly that proves you can do the work', 'Resumes lose to proof.', '120 min', today(), 'write'),
+      task("Write a one-paragraph 'why me' answer to the top question they'll ask", undefined, '30 min', today(), 'write'),
+      task('Have your resume + LinkedIn reviewed', 'You see your own copy too gently. Get an honest score.', '30 min', daysFromNow(3), 'review'),
     ]),
-    upcoming('Targeted outreach', 'Weeks 3–6', '20 warm-ish intros into companies actually a fit. Not 200 cold applies.'),
-    upcoming('Interview reps', 'Weeks 7–9', 'Drill the question patterns of your top 3 target companies.'),
-    upcoming('Close one', 'Weeks 10–12', 'First offer in hand — the next is much easier.'),
+    upcoming('Targeted outreach', 'Weeks 3–6', '20 warm-ish intros into companies actually a fit. Not 200 cold applies.', [
+      task('Build a list of 20 companies you would genuinely want to work at', 'Volume hiring funnels reject volume applicants.', '60 min', daysFromNow(14), 'research'),
+      task('Find one person at each (alum, LinkedIn 2nd-degree, etc)', 'Cold pitches lose. Warm intros win.', '90 min', daysFromNow(17), 'research'),
+      task('Draft + send the first 10 outreaches', "Templates are scaffolding; personalisation is the win.", '120 min', daysFromNow(21), 'outreach'),
+    ]),
+    upcoming('Interview reps', 'Weeks 7–9', 'Drill the question patterns of your top 3 target companies.', [
+      task('Identify the 5 most common question patterns at your top 3 targets', 'Patterns are public. Use Glassdoor + alumni.', '60 min', daysFromNow(45), 'research'),
+      task('Run 3 mock interviews with someone honest', 'Mirror-mocks are easy. Real ones expose you.', '3 × 45 min', daysFromNow(52), 'outreach'),
+    ]),
+    upcoming('Close one', 'Weeks 10–12', 'First offer in hand — the next is much easier.', [
+      task('Pre-write your decision criteria before any offer arrives', 'Decide in calm; choose in pressure.', '45 min', daysFromNow(65), 'reflect'),
+      task('Draft the 24-hour "thank you, may I think" reply', 'Never accept on the call.', '15 min', daysFromNow(70), 'write'),
+    ]),
   ],
   founder: () => [
-    p1('Validate the itch', 'Weeks 1–3', "Honest read on whether this is a hobby idea, a small business, or a real venture wedge.", [
-      task('Write the one sentence customer + pain + why now', 'If you can\'t, the idea isn\'t ready.', '45 min', today()),
-      task('Talk to 5 potential users — listen, don\'t pitch', 'You\'re testing pain, not selling vision.', '5 × 30 min', daysFromNow(3)),
-      task('Decide: kill it, shrink it, or commit harder', undefined, '20 min', daysFromNow(14)),
+    p1('Validate the itch', 'Weeks 1–3', 'Honest read on whether this is a hobby idea, a small business, or a real venture wedge.', [
+      task('Write the one sentence customer + pain + why now', "If you can't, the idea isn't ready.", '45 min', today(), 'write'),
+      task('Talk to 5 potential users — listen, don\'t pitch', "You're testing pain, not selling vision.", '5 × 30 min', daysFromNow(3), 'outreach'),
+      task('Decide: kill it, shrink it, or commit harder', 'A decision beats a maybe.', '20 min', daysFromNow(14), 'reflect'),
     ]),
-    upcoming('De-risk the bet', 'Weeks 4–6', 'Cut runway, set the kill ceiling, line up the version that survives founder burnout.'),
-    upcoming('Build the wedge', 'Weeks 7–10', "Ship the smallest thing one customer would pay for. Not the platform — the wedge."),
-    upcoming('First sale or first hire', 'Weeks 11–14', 'A real signal: a paying customer, or your first believer joining you.'),
+    upcoming('De-risk the bet', 'Weeks 4–6', 'Cut runway, set the kill ceiling, line up the version that survives founder burnout.', [
+      task('Write your kill ceiling: months of runway, criteria to stop', 'Founders die of slow bleed, not fast death. Set the line.', '60 min', daysFromNow(21), 'write'),
+      task('Cut three monthly expenses this week', 'Burn cut is the cheapest fundraise.', '45 min', daysFromNow(24), 'do'),
+      task('Identify the smallest version of the bet that can ship in 4 weeks', "If it's bigger than that you're hiding from the market.", '30 min', daysFromNow(28), 'reflect'),
+    ]),
+    upcoming('Build the wedge', 'Weeks 7–10', "Ship the smallest thing one customer would pay for. Not the platform — the wedge.", [
+      task('Spec the wedge in a one-page doc (what / for whom / not for whom)', 'Naming what you are NOT doing is the discipline.', '60 min', daysFromNow(42), 'write'),
+      task('Show the spec to your three closest target users for honest cuts', 'Friends say yes. Honest users cut.', '3 × 30 min', daysFromNow(45), 'outreach'),
+      task('Ship the smallest functioning version', 'Shipped > polished.', '5+ days', daysFromNow(56), 'do'),
+    ]),
+    upcoming('First sale or first hire', 'Weeks 11–14', 'A real signal: a paying customer, or your first believer joining you.', [
+      task('Make the explicit ask: "Will you pay $X for this?"', 'Vague usage signal is not money. Money is signal.', '60 min', daysFromNow(70), 'outreach'),
+      task('Write the pitch to the one person you want as employee #1', 'Recruiting starts before you have money to pay them.', '45 min', daysFromNow(80), 'write'),
+    ]),
   ],
   'real-feedback': () => [
     p1('Self-audit (the unflinching version)', 'Week 1', 'A receipts-based read of your last 90 days — what shipped, what slipped, what you avoided.', [
-      task('List every project you touched in the last 90 days + your honest contribution to each', "No softening. No 'we did X' — what did you do.", '60 min', today()),
-      task('Write the three things you suspect your manager would say if asked privately', "If you don't know, that's the first finding.", '30 min', today()),
+      task('List every project you touched in the last 90 days + your honest contribution to each', "No softening. No 'we did X' — what did you do.", '60 min', today(), 'write'),
+      task('Write the three things you suspect your manager would say if asked privately', "If you don't know, that's the first finding.", '30 min', today(), 'reflect'),
     ]),
-    upcoming('Get the outside read', 'Week 2', 'Three people you trust, asked specifically — not vaguely — for their honest take.'),
-    upcoming('Map the gaps', 'Weeks 3–4', "Two or three patterns you can't argue with. The work is in those, not the long list."),
-    upcoming('First improvement sprint', 'Weeks 5–8', 'Focused work on the one gap with the most leverage. Re-test honestly at the end.'),
+    upcoming('Get the outside read', 'Week 2', 'Three people you trust, asked specifically — not vaguely — for their honest take.', [
+      task('Draft the specific feedback request to send to three trusted people', 'Vague asks get vague answers. Be specific.', '30 min', daysFromNow(7), 'write'),
+      task('Send the three requests', undefined, '15 min', daysFromNow(8), 'outreach'),
+      task('Capture verbatim what each said — no editing', "Your filter softens. Capture raw.", '30 min', daysFromNow(11), 'reflect'),
+    ]),
+    upcoming('Map the gaps', 'Weeks 3–4', "Two or three patterns you can't argue with. The work is in those, not the long list.", [
+      task('Pattern-match across the feedback — name 2–3 themes', "Themes beat individual data points.", '45 min', daysFromNow(15), 'reflect'),
+      task('Pick the ONE theme you would most want to be different in 90 days', 'Focus beats breadth.', '20 min', daysFromNow(17), 'reflect'),
+    ]),
+    upcoming('First improvement sprint', 'Weeks 5–8', 'Focused work on the one gap with the most leverage. Re-test honestly at the end.', [
+      task('Design a 4-week practice plan for the chosen gap', 'A plan beats a resolution.', '45 min', daysFromNow(28), 'write'),
+      task('Re-test the gap with the same people in week 8', 'Closed-loop measurement is rare; do it.', '30 min', daysFromNow(56), 'outreach'),
+    ]),
   ],
   'improve-areas': () => [
-    p1('Find the lever', 'Week 1', "The one or two areas where focused work would unlock the biggest jump.", [
-      task('Pull your last three pieces of negative feedback — the ones that stung', 'Stinging means there\'s usually truth in it.', '30 min', today()),
-      task("Pick the ONE area you'd most want to be 10× better at in 90 days", 'Focus is the multiplier.', '20 min', today()),
+    p1('Find the lever', 'Week 1', 'The one or two areas where focused work would unlock the biggest jump.', [
+      task('Pull your last three pieces of negative feedback — the ones that stung', "Stinging means there's usually truth in it.", '30 min', today(), 'reflect'),
+      task("Pick the ONE area you'd most want to be 10× better at in 90 days", 'Focus is the multiplier.', '20 min', today(), 'reflect'),
     ]),
-    upcoming('Block the time', 'Weeks 2–4', '3–5 hours/week, recurring, protected. Without this the rest is theatre.'),
-    upcoming('Daily practice', 'Weeks 5–10', 'Specific drills, real work that exercises the weak muscle.'),
-    upcoming('Re-test honestly', 'Weeks 11–12', "Same situations that used to trip you up — measure the actual change."),
+    upcoming('Block the time', 'Weeks 2–4', '3–5 hours/week, recurring, protected. Without this the rest is theatre.', [
+      task('Block 3 hours/week on your calendar — recurring', 'Unscheduled improvement does not happen.', '15 min', daysFromNow(7), 'schedule'),
+      task('Write the practice plan: drills, real work, review cadence', 'Random reps build random skill.', '60 min', daysFromNow(9), 'write'),
+    ]),
+    upcoming('Daily practice', 'Weeks 5–10', 'Specific drills, real work that exercises the weak muscle.', [
+      task('Find or create three drills for the chosen area', 'Without drills you only get the easy work.', '45 min', daysFromNow(28), 'research'),
+      task('Apply the skill in a real, visible piece of current work', 'Drills are scaffolding; real reps are the win.', '5+ hrs', daysFromNow(35), 'do'),
+    ]),
+    upcoming('Re-test honestly', 'Weeks 11–12', 'Same situations that used to trip you up — measure the actual change.', [
+      task('Identify a real situation that previously tripped you', 'Lab tests do not count.', '20 min', daysFromNow(70), 'reflect'),
+      task('Run it. Capture honestly what changed and what did not', 'Closed-loop measurement is the discipline.', '30 min', daysFromNow(77), 'reflect'),
+    ]),
   ],
   'stay-valuable': () => [
     p1('Scan the field', 'Weeks 1–2', "What's shifting in your role + adjacent roles right now. Not just AI — every real force.", [
-      task('Read the last 6 months of senior voices in your field — list the recurring themes', 'Patterns beat predictions.', '90 min', today()),
-      task('Identify three skills that DOUBLED in market value in the last 18 months', undefined, '45 min', today()),
-      task('Identify two skills that LOST value (so you stop investing there)', undefined, '30 min', daysFromNow(2)),
+      task('Read the last 6 months of senior voices in your field — list the recurring themes', 'Patterns beat predictions.', '90 min', today(), 'research'),
+      task('Identify three skills that DOUBLED in market value in the last 18 months', undefined, '45 min', today(), 'research'),
+      task('Identify two skills that LOST value (so you stop investing there)', undefined, '30 min', daysFromNow(2), 'reflect'),
     ]),
-    upcoming('Pick your bets', 'Weeks 3–4', 'Two skills to go deep on. Not five. Two.'),
-    upcoming('Learning sprint', 'Weeks 5–10', 'Focused study + real projects that build the muscle, not just the credential.'),
-    upcoming('Apply in real work', 'Weeks 11–12', 'Use the new skill on a visible piece of your current job. Make it count.'),
+    upcoming('Pick your bets', 'Weeks 3–4', 'Two skills to go deep on. Not five. Two.', [
+      task('Pick the TWO skills you will bet on for 12 weeks', 'Five bets equals zero bets.', '30 min', daysFromNow(14), 'reflect'),
+      task('Write a one-page case for each: why this, why now, what proves it', 'Force the reasoning to be legible.', '60 min', daysFromNow(17), 'write'),
+    ]),
+    upcoming('Learning sprint', 'Weeks 5–10', 'Focused study + real projects that build the muscle, not just the credential.', [
+      task('Find a real project at work where the new skill is relevant', 'Courses without application decay in 60 days.', '45 min', daysFromNow(28), 'research'),
+      task('Ship something using the new skill — even small', 'Shipped > studied.', '5+ hrs', daysFromNow(42), 'do'),
+    ]),
+    upcoming('Apply in real work', 'Weeks 11–12', 'Use the new skill on a visible piece of your current job. Make it count.', [
+      task('Identify the one visible artifact where the new skill should show', "Make it legible to your manager and skip-level.", '30 min', daysFromNow(70), 'reflect'),
+      task('Write a brief post or share-out about what you learned', "Public learning compounds; private learning evaporates.", '60 min', daysFromNow(77), 'write'),
+    ]),
   ],
   'sense-next': () => [
     p1('Map where you actually are', 'Weeks 1–2', "Honest read on your current life, work, energy, money — not the polite version.", [
-      task('Write a one-page state-of-things: work, money, energy, relationships, what you want different', 'The clarity comes from writing, not thinking.', '60 min', today()),
-      task("Name the three things you'd most want different in 12 months — concretely", undefined, '30 min', today()),
+      task('Write a one-page state-of-things: work, money, energy, relationships, what you want different', 'The clarity comes from writing, not thinking.', '60 min', today(), 'write'),
+      task("Name the three things you'd most want different in 12 months — concretely", undefined, '30 min', today(), 'reflect'),
     ]),
-    upcoming('Generate options', 'Weeks 3–5', 'Three or four realistic paths forward. The point is to see them side-by-side.'),
-    upcoming('Pressure-test one', 'Weeks 6–9', "Pick the one you can\'t stop thinking about. Try it small before betting the year on it."),
-    upcoming('Commit or release', 'Weeks 10–12', "Either go bigger on it, or honestly drop it and pick another. Decisive beats stuck."),
+    upcoming('Generate options', 'Weeks 3–5', 'Three or four realistic paths forward. The point is to see them side-by-side.', [
+      task('Write 4 honest paths forward — title + one paragraph each', 'Options-on-paper beat options-in-head.', '60 min', daysFromNow(14), 'write'),
+      task('For each: name the one thing that has to be true for it to work', 'Surfaces what you are betting on.', '45 min', daysFromNow(17), 'reflect'),
+      task('Talk to one person who has walked each path', 'Cheapest education in the world is asking.', '4 × 30 min', daysFromNow(21), 'outreach'),
+    ]),
+    upcoming('Pressure-test one', 'Weeks 6–9', "Pick the one you can't stop thinking about. Try it small before betting the year on it.", [
+      task('Pick the path you keep returning to', 'Repetition is signal.', '20 min', daysFromNow(35), 'reflect'),
+      task('Design a 4-week cheap test of that path', "A real test beats months of more thinking.", '60 min', daysFromNow(38), 'write'),
+    ]),
+    upcoming('Commit or release', 'Weeks 10–12', "Either go bigger on it, or honestly drop it and pick another. Decisive beats stuck.", [
+      task('Write the decision: bigger, smaller, or stop', 'Indecision is the most expensive option.', '45 min', daysFromNow(70), 'write'),
+      task('Tell one person the decision out loud', 'Said-out-loud beats written-and-shelved.', '20 min', daysFromNow(74), 'outreach'),
+    ]),
   ],
   custom: () => [
     p1('Get specific', 'Weeks 1–2', 'Turn the goal from a feeling into a small set of things you can actually do this week.', [
-      task('Write what "achieved" looks like in concrete terms', "If you can't see it, you can't aim at it.", '30 min', today()),
-      task('Identify the three biggest unknowns blocking you', undefined, '20 min', today()),
+      task('Write what "achieved" looks like in concrete terms', "If you can't see it, you can't aim at it.", '30 min', today(), 'write'),
+      task('Identify the three biggest unknowns blocking you', undefined, '20 min', today(), 'reflect'),
     ]),
-    upcoming('Test cheap assumptions', 'Weeks 3–5', 'Small experiments that resolve the biggest unknowns quickly.'),
-    upcoming('Commit to the path', 'Weeks 6–9', 'Based on what you learned, double down on the version that worked.'),
-    upcoming('Land the result', 'Weeks 10–12', 'Closing work that gets you to the goal in its concrete form.'),
+    upcoming('Test cheap assumptions', 'Weeks 3–5', 'Small experiments that resolve the biggest unknowns quickly.', [
+      task('Design a 1-week test for the first unknown', 'Tests > theories.', '45 min', daysFromNow(14), 'write'),
+      task('Run the test. Capture honestly what you learned', undefined, '5+ hrs', daysFromNow(21), 'do'),
+    ]),
+    upcoming('Commit to the path', 'Weeks 6–9', 'Based on what you learned, double down on the version that worked.', [
+      task('Pick the version of the goal that survived the tests', 'Surviving > original.', '30 min', daysFromNow(35), 'reflect'),
+      task('Write the 4-week plan to push it forward', undefined, '60 min', daysFromNow(38), 'write'),
+    ]),
+    upcoming('Land the result', 'Weeks 10–12', 'Closing work that gets you to the goal in its concrete form.', [
+      task("Define what 'done' looks like, week by week", 'Vague endings drift.', '45 min', daysFromNow(60), 'write'),
+      task('Ship the closing artifact (whatever proves the goal)', 'Done is done.', '5+ hrs', daysFromNow(77), 'do'),
+    ]),
   ],
 };
 
@@ -497,11 +738,17 @@ function tId() {
 function p1(title: string, meta: string, outcome: string, tasks: Task[]): Phase {
   return { id: pId(), title, meta, outcome, status: 'in_progress', tasks };
 }
-function upcoming(title: string, meta: string, outcome: string): Phase {
-  return { id: pId(), title, meta, outcome, status: 'upcoming', tasks: [] };
+function upcoming(title: string, meta: string, outcome: string, tasks: Task[] = []): Phase {
+  return { id: pId(), title, meta, outcome, status: 'upcoming', tasks };
 }
-function task(title: string, why: string | undefined, effort: string, dueOn: string): Task {
-  return { id: tId(), title, why, effort, status: 'todo', dueOn };
+function task(
+  title: string,
+  why: string | undefined,
+  effort: string,
+  dueOn: string,
+  kind: TaskKind = 'do',
+): Task {
+  return { id: tId(), title, why, effort, status: 'todo', dueOn, kind };
 }
 
 /**
@@ -698,12 +945,17 @@ export async function applyPathUpdate(update: PathUpdate): Promise<Goal | null> 
     }
   }
 
-  // Re-derive each phase's status from its tasks.
-  for (const phase of active.phases) {
+  // Re-derive each phase's status from its tasks, then activate the
+  // next phase if the active one just wrapped (same UX guarantee as
+  // setTaskStatus — never leave the user with no tasks today).
+  for (let i = 0; i < active.phases.length; i++) {
+    const phase = active.phases[i];
     const allResolved = phase.tasks.length > 0 && phase.tasks.every((t) => t.status !== 'todo');
     const anyDone = phase.tasks.some((t) => t.status === 'done');
+    const prevStatus = phase.status;
     if (allResolved) phase.status = 'done';
     else if (anyDone) phase.status = 'in_progress';
+    if (allResolved && prevStatus !== 'done') activateNextPhase(active, i);
   }
 
   await syncGoal(active);
@@ -788,21 +1040,90 @@ export async function todaysTasks(): Promise<{ goal: Goal; phase: Phase; task: T
   return out;
 }
 
-export async function setTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
+/** Find a task by id across all goals + phases. Returns the goal, phase,
+ *  and task so the workspace can render with full context. */
+export async function findTask(
+  taskId: string,
+): Promise<{ goal: Goal; phase: Phase; task: Task } | null> {
+  await ensureLoaded();
   for (const goal of _goals) {
     for (const phase of goal.phases) {
+      const t = phase.tasks.find((x) => x.id === taskId);
+      if (t) return { goal, phase, task: t };
+    }
+  }
+  return null;
+}
+
+export async function setTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
+  for (const goal of _goals) {
+    for (let i = 0; i < goal.phases.length; i++) {
+      const phase = goal.phases[i];
       for (const task of phase.tasks) {
         if (task.id === taskId) {
           task.status = status;
-          // recompute phase status
-          const allDone = phase.tasks.every((t) => t.status !== 'todo');
+          const allResolved = phase.tasks.every((t) => t.status !== 'todo');
           const anyDone = phase.tasks.some((t) => t.status === 'done');
-          phase.status = allDone ? 'done' : anyDone ? 'in_progress' : phase.status;
+          phase.status = allResolved ? 'done' : anyDone ? 'in_progress' : phase.status;
+          // When the active phase wraps, immediately activate the next
+          // one so the user has tasks today — not "wait two weeks".
+          if (allResolved) activateNextPhase(goal, i);
+          await syncGoal(goal);
           return;
         }
       }
     }
   }
+}
+
+/** Promote the phase after `completedIdx` to in_progress and make sure
+ *  it has tasks the user can act on today. Two repairs:
+ *    1) If the phase has zero tasks (intent templates seed only phase 1),
+ *       generate starter tasks from the phase title + outcome.
+ *    2) If existing todos are dated weeks out, pull them to today so
+ *       they show up in Today's tasks immediately. */
+function activateNextPhase(goal: Goal, completedIdx: number): void {
+  const next = goal.phases[completedIdx + 1];
+  if (!next) return;
+  if (next.status === 'done') return;
+  next.status = 'in_progress';
+  const todayStr = today();
+  if (next.tasks.length === 0) {
+    next.tasks = starterTasksFor(next);
+  } else {
+    for (const t of next.tasks) {
+      if (t.status === 'todo' && t.dueOn > todayStr) t.dueOn = todayStr;
+    }
+  }
+}
+
+/** Generic starter tasks for an unseeded phase — uses the phase's own
+ *  outcome statement so they read tailored, not generic. The agent
+ *  replaces these with real tasks on the next chat turn. */
+function starterTasksFor(phase: Phase): Task[] {
+  return [
+    task(
+      `Read the outcome for "${phase.title}" — write what it would look like for you`,
+      `Each phase has a stated outcome. Naming it in your own words is the first step.`,
+      '15 min',
+      today(),
+      'reflect',
+    ),
+    task(
+      `Identify the one thing that has to be true by the end of ${phase.meta.toLowerCase()}`,
+      `Phases drift without a clear finish line.`,
+      '10 min',
+      today(),
+      'reflect',
+    ),
+    task(
+      `Open chat and ask your agent to break this phase into concrete tasks`,
+      undefined,
+      '5 min',
+      today(),
+      'do',
+    ),
+  ];
 }
 
 export function progress(goal: Goal): { done: number; total: number; pct: number } {

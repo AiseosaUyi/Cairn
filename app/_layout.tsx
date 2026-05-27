@@ -26,7 +26,7 @@ import {
   InstrumentSerif_400Regular_Italic,
 } from '@expo-google-fonts/instrument-serif';
 import { InstallBanner } from '@/components/InstallBanner';
-import { InstallModal } from '@/components/InstallModal';
+import { initBotIdOnce } from '@/pwa/botid-init';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -44,6 +44,12 @@ export default function RootLayout() {
     if (loaded || error) SplashScreen.hideAsync().catch(() => {});
   }, [loaded, error]);
 
+  useEffect(() => {
+    // BotID — web-only, no-op on native. Initializes once at app boot so
+    // /api/coach and /api/transcribe carry the challenge headers.
+    initBotIdOnce();
+  }, []);
+
   if (!loaded && !error) return null;
 
   return (
@@ -53,11 +59,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
-      {/* PWA install affordances — both components self-gate (web only,
-          right device class, not already installed, not dismissed) so
-          mounting them globally is safe. */}
+      {/* PWA install — single surface. Banner self-gates: web only, mobile
+          only, only when an install path actually exists (Android Chrome
+          with beforeinstallprompt fired, or iOS Safari with its share
+          menu), not already installed, not recently dismissed. */}
       <InstallBanner />
-      <InstallModal />
     </GestureHandlerRootView>
   );
 }

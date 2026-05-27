@@ -34,11 +34,13 @@ function PhaseCard({
   index,
   total,
   onToggleTask,
+  onOpenTask,
 }: {
   phase: Phase;
   index: number;
   total: number;
   onToggleTask: (taskId: string, currentStatus: 'todo' | 'done' | 'skipped') => void;
+  onOpenTask: (taskId: string) => void;
 }) {
   const { colors } = useTheme();
   const doneCount = phase.tasks.filter((t) => t.status === 'done').length;
@@ -136,6 +138,7 @@ function PhaseCard({
                 caption={t.effort ? `${t.effort}${t.why ? ' · ' + t.why : ''}` : t.why}
                 done={t.status === 'done'}
                 onToggle={() => onToggleTask(t.id, t.status)}
+                onOpen={() => onOpenTask(t.id)}
               />
             </View>
           ))}
@@ -288,6 +291,7 @@ export default function Goals() {
                 await setTaskStatus(taskId, current === 'done' ? 'todo' : 'done');
                 setTick((t) => t + 1);
               }}
+              onOpenTask={(taskId) => router.push(`/career/task/${taskId}` as any)}
             />
           ))}
         </View>

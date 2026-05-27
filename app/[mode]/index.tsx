@@ -317,7 +317,7 @@ export default function Today() {
               <View style={{ paddingVertical: space.lg, alignItems: 'center', gap: space.xs }}>
                 <Icon glyph={Sparkles} soft size={22} />
                 <Text variant="body" soft style={{ textAlign: 'center' }}>
-                  No tasks scheduled for today.{'\n'}Open your path to plan the next step.
+                  No tasks scheduled for today.{'\n'}Switch to Goals to see your full path.
                 </Text>
               </View>
             ) : (
@@ -340,6 +340,7 @@ export default function Today() {
                       );
                       setTick((t) => t + 1);
                     }}
+                    onOpen={() => router.push(`/career/task/${it.task.id}` as any)}
                   />
                 </View>
               ))

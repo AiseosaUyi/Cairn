@@ -255,3 +255,94 @@ export async function cloudUpsertGoal(uid: string, g: Goal): Promise<Goal | null
 export async function cloudDeleteGoal(_uid: string, goalId: string): Promise<void> {
   await supabase().from('goals').delete().eq('id', goalId);
 }
+
+// ---------------------------------------------------------------------------
+// Artifacts <-> DB row mapping
+//
+// The artifacts table is loose-typed (jsonb columns for review/score/examples)
+// so the same row can serve every kind. Map both directions here; the
+// in-memory store in src/companion/artifacts.ts calls these when signed in.
+// ---------------------------------------------------------------------------
+
+import type {
+  Artifact,
+  ArtifactKind,
+  ArtifactReview,
+  ArtifactScore,
+  ArtifactExample,
+} from '@/companion/artifacts';
+
+interface ArtifactRow {
+  id: string;
+  user_id: string;
+  goal_id: string;
+  task_id: string;
+  kind: ArtifactKind;
+  title: string;
+  body: string | null;
+  review: ArtifactReview | null;
+  score: ArtifactScore | null;
+  examples: ArtifactExample[] | null;
+  source_url: string | null;
+  created_at: string;
+}
+
+function rowToArtifact(r: ArtifactRow): Artifact {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    goalId: r.goal_id,
+    kind: r.kind,
+    title: r.title,
+    createdAt: r.created_at,
+    body: r.body ?? undefined,
+    review: r.review ?? undefined,
+    score: r.score ?? undefined,
+    examples: r.examples ?? undefined,
+    sourceUrl: r.source_url ?? undefined,
+  };
+}
+
+function artifactToRow(a: Artifact, uid: string): Omit<ArtifactRow, 'id' | 'created_at'> & { id?: string } {
+  const isUuid = /^[0-9a-f-]{36}$/i.test(a.id);
+  return {
+    ...(isUuid ? { id: a.id } : {}),
+    user_id: uid,
+    goal_id: a.goalId,
+    task_id: a.taskId,
+    kind: a.kind,
+    title: a.title,
+    body: a.body ?? null,
+    review: a.review ?? null,
+    score: a.score ?? null,
+    examples: a.examples ?? null,
+    source_url: a.sourceUrl ?? null,
+  };
+}
+
+export async function cloudListArtifacts(uid: string): Promise<Artifact[]> {
+  if (!supabaseEnabled()) return [];
+  const { data, error } = await supabase()
+    .from('artifacts')
+    .select('*')
+    .eq('user_id', uid)
+    .order('created_at', { ascending: false });
+  if (error || !data) return [];
+  return (data as ArtifactRow[]).map(rowToArtifact);
+}
+
+export async function cloudInsertArtifact(uid: string, a: Artifact): Promise<Artifact | null> {
+  if (!supabaseEnabled()) return null;
+  const row = artifactToRow(a, uid);
+  const { data, error } = await supabase()
+    .from('artifacts')
+    .insert(row)
+    .select()
+    .single();
+  if (error || !data) return null;
+  return rowToArtifact(data as ArtifactRow);
+}
+
+export async function cloudDeleteArtifact(_uid: string, id: string): Promise<void> {
+  await supabase().from('artifacts').delete().eq('id', id);
+}
