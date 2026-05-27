@@ -1,220 +1,454 @@
 /**
- * Companion picker — pick your AI agent from a roster of 8 character
- * archetypes (HR, recruiter, coach, negotiator, etc.). Pattern matches
- * the founder's reference: a focused front card with the next card
- * peeking, swipe horizontally, filter chips at the top, big CTA below.
+ * Companion picker — Bumble-style swipe stack.
  *
- * Used in two places:
- *   1) During onboarding (after region) — link from /onboarding
- *   2) From the You tab as a "Change your companion" entry — link from /you
+ * Single viewport, no scroll. Header (back + upload + skip), card stack
+ * (three cards visible — top is interactive, two peek behind), progress
+ * dots, and primary CTA. Filters removed entirely per founder feedback
+ * ("too much info").
  *
- * Placeholder portraits use DiceBear "personas" — production swaps to a
- * generated-image pipeline using `buildImagePrompt(c)` from characters.ts.
+ * Interactions:
+ *   - Drag the top card right → accept this companion → navigate.
+ *   - Drag left → skip (card cycles to bottom of the stack).
+ *   - Tap "Choose X" CTA → same as drag-right.
+ *   - Tap upload icon (header) → web file picker; sets profile avatar
+ *     and accepts a generated companion stub. Native picker is a
+ *     follow-up.
+ *
+ * Animation:
+ *   - Pan via react-native-gesture-handler v2.
+ *   - Card translateX + Y + rotation as shared values.
+ *   - "Choose" and "Skip" overlays fade in as the user drags past
+ *     ~30% of the threshold.
+ *   - Below-threshold release springs back to center.
+ *   - Above-threshold release animates fully off-screen.
+ *
+ * `next` query param routes the navigation target on accept; default
+ * `/career` so direct navigation works.
  */
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Dimensions, Image, Pressable, ScrollView, View } from 'react-native';
-import { MotiView } from 'moti';
-import { Easing } from 'react-native-reanimated';
-import { ArrowLeft, Check, ImagePlus } from 'lucide-react-native';
+import { Alert, Dimensions, Image, Platform, Pressable, View } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+} from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { ArrowLeft, Check, ImagePlus, X } from 'lucide-react-native';
 import { ThemeProvider, useTheme } from '@/design/theme';
 import { Text } from '@/design/Text';
 import { layout, motion, shadow, space } from '@/design/tokens';
-import { Button, Card, Chip, Rise, Screen } from '@/components/ui';
 import { setProfile } from '@/profile';
-import {
-  CHARACTERS,
-  avatarUrl,
-  findCharacter,
-  type Character,
-} from '@/companion/characters';
+import { CHARACTERS, avatarUrl, type Character } from '@/companion/characters';
 
-type RoleFilter = 'All' | 'Free' | 'Premium';
-type RegionFilter = 'All' | Character['region'];
+const SWIPE_DECISION_THRESHOLD = 110;
+const SWIPE_VELOCITY_THRESHOLD = 700;
 
-const FILTER_REGIONS: RegionFilter[] = ['All', 'Global', 'US', 'EU', 'APAC', 'NG'];
-const FILTER_TIERS: RoleFilter[] = ['All', 'Free', 'Premium'];
-
-function CompanionCard({
-  c,
-  primary,
-  onChoose,
-}: {
-  c: Character;
-  primary: boolean;
-  onChoose: () => void;
-}) {
+// ---------------------------------------------------------------------------
+// One card — the static, non-interactive layout. The top card uses this
+// inside a GestureDetector + Animated.View wrapper.
+// ---------------------------------------------------------------------------
+function CardSurface({ c }: { c: Character }) {
   const { colors } = useTheme();
   return (
     <View
       style={{
+        flex: 1,
         backgroundColor: colors.ink,
-        borderRadius: layout.radius.sheet,
+        borderRadius: 28,
         overflow: 'hidden',
         ...shadow.raised,
       }}
     >
+      <Image
+        source={{ uri: avatarUrl(c, 600) }}
+        accessibilityLabel={`Portrait of ${c.name}`}
+        style={{ position: 'absolute', inset: 0 as any, width: '100%', height: '100%' }}
+        resizeMode="cover"
+      />
+      {/* Bottom darkening gradient → keeps copy readable on busy portraits.
+          Using a stack of progressively darker translucent rectangles is
+          cheaper than an SVG/expo-linear-gradient dependency. */}
       <View
+        pointerEvents="none"
         style={{
-          aspectRatio: 0.78,
-          backgroundColor: '#F1E5D6',
-          position: 'relative',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: '55%',
+          backgroundColor: 'rgba(0,0,0,0.0)',
         }}
       >
-        <Image
-          source={{ uri: avatarUrl(c, 600) }}
-          accessibilityLabel={`Portrait of ${c.name}`}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
-        />
-        {/* Premium badge */}
-        {c.premium && (
+        {[0, 1, 2, 3].map((i) => (
           <View
+            key={i}
             style={{
-              position: 'absolute',
-              top: space.md,
-              left: space.md,
-              backgroundColor: '#F5C063',
-              paddingHorizontal: space.sm,
-              paddingVertical: 4,
-              borderRadius: layout.radius.full,
+              flex: 1,
+              backgroundColor: `rgba(14,13,11,${0.08 + i * 0.18})`,
             }}
-          >
-            <Text variant="caption" color="#0E0D0B" style={{ fontWeight: '700', letterSpacing: 0.4 }}>
-              PREMIUM
-            </Text>
-          </View>
-        )}
-        {/* Region pill */}
+          />
+        ))}
+      </View>
+      {/* Premium badge */}
+      {c.premium && (
         <View
           style={{
             position: 'absolute',
             top: space.md,
-            right: space.md,
-            backgroundColor: 'rgba(14,13,11,0.55)',
+            left: space.md,
+            backgroundColor: '#F5C063',
             paddingHorizontal: space.sm,
             paddingVertical: 4,
             borderRadius: layout.radius.full,
           }}
         >
-          <Text variant="caption" color="#FFFFFF" style={{ fontWeight: '600', letterSpacing: 0.4 }}>
-            {c.region.toUpperCase()}
+          <Text variant="caption" color="#0E0D0B" style={{ fontWeight: '700', letterSpacing: 0.4, fontSize: 10 }}>
+            PREMIUM
           </Text>
         </View>
-      </View>
-
-      <View style={{ padding: space.lg, gap: space.sm }}>
-        <View style={{ gap: 4 }}>
-          <Text
-            variant="caption"
-            color="rgba(255,255,255,0.55)"
-            style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}
-          >
-            {c.role.toUpperCase()}
-          </Text>
-          <Text
-            color="#FFFFFF"
-            style={{
-              fontFamily: 'InstrumentSerif_400Regular',
-              fontSize: 28,
-              lineHeight: 32,
-              letterSpacing: -0.3,
-            }}
-          >
-            {c.name}
-          </Text>
-        </View>
-
-        <Text variant="body" color="rgba(255,255,255,0.75)">
+      )}
+      {/* Copy block — name, role, vibe */}
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: space.lg,
+          gap: 4,
+        }}
+      >
+        <Text
+          variant="caption"
+          color="rgba(255,255,255,0.7)"
+          style={{ letterSpacing: 0.5, fontWeight: '700', fontSize: 11 }}
+        >
+          {c.role.toUpperCase()}
+        </Text>
+        <Text
+          color="#FFFFFF"
+          style={{
+            fontFamily: 'InstrumentSerif_400Regular',
+            fontSize: 34,
+            lineHeight: 38,
+            letterSpacing: -0.4,
+          }}
+        >
+          {c.name}
+        </Text>
+        <Text
+          color="rgba(255,255,255,0.82)"
+          style={{ fontSize: 14, lineHeight: 20, marginTop: 4 }}
+        >
           {c.vibe}
         </Text>
-
-        <View style={{ gap: 6, marginTop: space.xs }}>
-          {c.skills.map((s) => (
-            <View key={s} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
-              <View
-                style={{
-                  width: 4,
-                  height: 4,
-                  borderRadius: 2,
-                  backgroundColor: colors.accent,
-                  marginTop: 8,
-                }}
-              />
-              <Text variant="caption" color="rgba(255,255,255,0.7)" style={{ flex: 1 }}>
-                {s}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {primary && (
-          <Pressable
-            onPress={onChoose}
-            accessibilityRole="button"
-            accessibilityLabel={`Choose ${c.name} as your companion`}
-            style={{
-              marginTop: space.md,
-              backgroundColor: '#FFFFFF',
-              borderRadius: layout.radius.full,
-              minHeight: 50,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text variant="button" color="#0E0D0B">
-              Choose {c.name}
-            </Text>
-          </Pressable>
-        )}
       </View>
     </View>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Top, draggable card. Reads the pan offset as shared values and applies
+// transform + decision overlays. Calls back to JS to advance or accept.
+// ---------------------------------------------------------------------------
+function TopCard({
+  c,
+  onAccept,
+  onSkip,
+}: {
+  c: Character;
+  onAccept: () => void;
+  onSkip: () => void;
+}) {
+  const { colors } = useTheme();
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const screenW = Dimensions.get('window').width;
+
+  const finishAccept = useCallback(() => onAccept(), [onAccept]);
+  const finishSkip = useCallback(() => {
+    // Reset position synchronously before swapping in the next character,
+    // otherwise the new card starts off-screen.
+    translateX.value = 0;
+    translateY.value = 0;
+    onSkip();
+  }, [onSkip, translateX, translateY]);
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+      translateY.value = e.translationY * 0.4; // dampen vertical
+    })
+    .onEnd((e) => {
+      const swipedRight =
+        e.translationX > SWIPE_DECISION_THRESHOLD ||
+        e.velocityX > SWIPE_VELOCITY_THRESHOLD;
+      const swipedLeft =
+        e.translationX < -SWIPE_DECISION_THRESHOLD ||
+        e.velocityX < -SWIPE_VELOCITY_THRESHOLD;
+
+      if (swipedRight) {
+        translateX.value = withTiming(
+          screenW * 1.4,
+          { duration: 280, easing: Easing.out(Easing.quad) },
+          () => runOnJS(finishAccept)(),
+        );
+        translateY.value = withTiming(translateY.value + 40, { duration: 280 });
+      } else if (swipedLeft) {
+        translateX.value = withTiming(
+          -screenW * 1.4,
+          { duration: 280, easing: Easing.out(Easing.quad) },
+          () => runOnJS(finishSkip)(),
+        );
+        translateY.value = withTiming(translateY.value + 40, { duration: 280 });
+      } else {
+        translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+        translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+      }
+    });
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { rotate: `${translateX.value / 24}deg` },
+    ],
+  }));
+
+  // Overlays fade in as the user crosses ~30% of the decision threshold.
+  const acceptOverlay = useAnimatedStyle(() => ({
+    opacity: Math.max(0, Math.min(1, (translateX.value - 30) / SWIPE_DECISION_THRESHOLD)),
+  }));
+  const skipOverlay = useAnimatedStyle(() => ({
+    opacity: Math.max(0, Math.min(1, (-translateX.value - 30) / SWIPE_DECISION_THRESHOLD)),
+  }));
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        // touchAction:none stops mobile browsers from intercepting the
+        // gesture for page scrolling. cursor/userSelect are web-only and
+        // not in the RN ViewStyle type — cast keeps TS happy without
+        // unused @ts-expect-error directives.
+        style={[
+          {
+            ...StyleSheetAbsoluteFill,
+            ...({ touchAction: 'none', userSelect: 'none', cursor: 'grab' } as object),
+          } as object,
+          cardStyle,
+        ]}
+      >
+        <CardSurface c={c} />
+
+        {/* CHOOSE overlay (right swipe) */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: 26,
+              left: 26,
+              transform: [{ rotate: '-14deg' }],
+              borderColor: colors.encourage,
+              borderWidth: 3,
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 6,
+            },
+            acceptOverlay,
+          ]}
+        >
+          <Text
+            color={colors.encourage}
+            style={{ fontWeight: '900', letterSpacing: 2, fontSize: 22 }}
+          >
+            CHOOSE
+          </Text>
+        </Animated.View>
+
+        {/* SKIP overlay (left swipe) */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: 26,
+              right: 26,
+              transform: [{ rotate: '14deg' }],
+              borderColor: colors.inkSoft,
+              borderWidth: 3,
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 6,
+            },
+            skipOverlay,
+          ]}
+        >
+          <Text
+            color={colors.inkSoft}
+            style={{ fontWeight: '900', letterSpacing: 2, fontSize: 22 }}
+          >
+            SKIP
+          </Text>
+        </Animated.View>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
+// Inline replacement for StyleSheet.absoluteFillObject without importing
+// StyleSheet — keeps the imports tight.
+const StyleSheetAbsoluteFill = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Background peek cards — show 2 behind the top one, lightly offset +
+// scaled down so the user sees there's depth to the deck.
+// ---------------------------------------------------------------------------
+function PeekCard({ c, depth }: { c: Character; depth: 1 | 2 }) {
+  const scale = depth === 1 ? 0.94 : 0.88;
+  const translateY = depth === 1 ? 14 : 28;
+  const opacity = depth === 1 ? 0.6 : 0.35;
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        ...StyleSheetAbsoluteFill,
+        transform: [{ scale }, { translateY }],
+        opacity,
+      }}
+    >
+      <CardSurface c={c} />
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tiny progress dots — current card highlighted, others soft.
+// ---------------------------------------------------------------------------
+function Dots({ count, current }: { count: number; current: number }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <View
+          key={i}
+          style={{
+            width: i === current ? 22 : 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: i === current ? colors.ink : colors.hairline,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Web file picker for "Upload your own". Reads the file as a data URL so
+// it survives a refresh without a CDN round-trip. Returns the dataURL or
+// null on cancel/error.
+// ---------------------------------------------------------------------------
+async function pickImageWeb(): Promise<string | null> {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
 function Inner() {
   const router = useRouter();
   const { next } = useLocalSearchParams<{ next?: string }>();
   const { colors } = useTheme();
-  const [tier, setTier] = useState<RoleFilter>('All');
-  const [region, setRegion] = useState<RegionFilter>('All');
-  const [index, setIndex] = useState(0);
-  const [choosing, setChoosing] = useState(false);
+  const [idx, setIdx] = useState(0);
+  // Stable shuffle ref — order stays fixed within a session so the
+  // progress dots remain meaningful.
+  const order = useRef<Character[]>(CHARACTERS).current;
+  const total = order.length;
+  const current = useMemo(() => order[idx % total], [idx, order, total]);
+  const peek1 = useMemo(() => order[(idx + 1) % total], [idx, order, total]);
+  const peek2 = useMemo(() => order[(idx + 2) % total], [idx, order, total]);
 
-  const filtered = useMemo(
-    () =>
-      CHARACTERS.filter((c) => {
-        if (tier === 'Free' && c.premium) return false;
-        if (tier === 'Premium' && !c.premium) return false;
-        if (region !== 'All' && c.region !== region) return false;
-        return true;
-      }),
-    [tier, region],
-  );
-
-  const current = filtered[index] ?? filtered[0];
-
-  const choose = useCallback(
+  const accept = useCallback(
     async (c: Character) => {
-      setChoosing(true);
       await setProfile({ companionId: c.id });
-      // Forward flow (onboarding) uses ?next=/career; standalone flow
-      // (You tab) omits next and bounces back to where the user was.
-      if (next) {
-        router.replace(next as any);
-      } else {
-        router.back();
-      }
+      const target = next || '/career';
+      router.replace(target as any);
     },
     [router, next],
   );
 
-  const screenWidth = Dimensions.get('window').width;
-  const cardWidth = Math.min(screenWidth - space.lg * 2, layout.maxContentWidth - space.lg * 2);
+  const skip = useCallback(() => {
+    setIdx((i) => (i + 1) % total);
+  }, [total]);
+
+  const onUpload = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert(
+        'Coming soon',
+        'Uploading your own avatar from native apps will land with the cartoon-conversion pipeline. For now, pick a companion from the cast.',
+      );
+      return;
+    }
+    const dataUrl = await pickImageWeb();
+    if (!dataUrl) return;
+    // Save the uploaded image and keep the currently-visible character
+    // as the companion persona — the photo overrides the avatar surface
+    // (You-tab profile, chat header) but the AI persona stays consistent.
+    await setProfile({ avatarUri: dataUrl, companionId: current.id });
+    const target = next || '/career';
+    router.replace(target as any);
+  }, [current, router, next]);
 
   return (
-    <Screen tabSafe={false}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.canvas,
+        paddingHorizontal: space.lg,
+        paddingTop: space.lg,
+        paddingBottom: space.lg,
+        maxWidth: layout.maxContentWidth,
+        alignSelf: 'center',
+        width: '100%',
+      }}
+    >
+      {/* Header — back, upload, skip. Compact so cards get the room. */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: space.sm,
+        }}
+      >
         <Pressable
           onPress={() => router.back()}
           accessibilityRole="button"
@@ -232,232 +466,144 @@ function Inner() {
         >
           <ArrowLeft size={18} color={colors.ink} strokeWidth={1.75} />
         </Pressable>
+
         <Pressable
-          onPress={() => (next ? router.replace(next as any) : router.back())}
+          onPress={onUpload}
+          accessibilityRole="button"
+          accessibilityLabel="Upload your own avatar"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: space.md,
+            height: 40,
+            borderRadius: layout.radius.full,
+            backgroundColor: colors.card,
+            borderColor: colors.hairline,
+            borderWidth: 1,
+          }}
+        >
+          <ImagePlus size={16} color={colors.ink} strokeWidth={1.75} />
+          <Text variant="caption" style={{ fontSize: 12, fontWeight: '600' }}>
+            Upload your own
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => {
+            if (next) router.replace(next as any);
+            else router.back();
+          }}
           accessibilityRole="button"
           accessibilityLabel="Skip"
+          hitSlop={10}
+          style={{ paddingHorizontal: space.xs, height: 40, justifyContent: 'center' }}
         >
-          <Text variant="label" color={colors.accent} style={{ textTransform: 'none', fontSize: 14 }}>
+          <Text variant="caption" color={colors.accent} style={{ fontSize: 13, fontWeight: '700' }}>
             Skip
           </Text>
         </Pressable>
       </View>
 
-      <Rise>
-        <View style={{ gap: 8 }}>
-          <Text variant="display" style={{ fontSize: 40, lineHeight: 44 }}>
-            Choose your{'\n'}AI companion.
-          </Text>
-          <Text variant="lede" soft>
-            Eight specialists. Each one frames your goals through their lens.
-            You can change anytime.
-          </Text>
-        </View>
-      </Rise>
-
-      <Rise delay={60}>
-        <View style={{ gap: space.sm }}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: space.xs }}
-          >
-            {FILTER_TIERS.map((t) => (
-              <Pressable
-                key={t}
-                onPress={() => {
-                  setTier(t);
-                  setIndex(0);
-                }}
-                style={{
-                  paddingHorizontal: space.md,
-                  paddingVertical: space.xs,
-                  borderRadius: layout.radius.full,
-                  backgroundColor: tier === t ? colors.ink : 'transparent',
-                  borderWidth: 1,
-                  borderColor: tier === t ? colors.ink : colors.hairline,
-                }}
-              >
-                <Text
-                  variant="caption"
-                  color={tier === t ? '#FFFFFF' : colors.ink}
-                  style={{ fontWeight: '600', letterSpacing: 0.3, fontSize: 12 }}
-                >
-                  {t}
-                </Text>
-              </Pressable>
-            ))}
-            <View style={{ width: space.sm }} />
-            {FILTER_REGIONS.map((r) => (
-              <Pressable
-                key={r}
-                onPress={() => {
-                  setRegion(r);
-                  setIndex(0);
-                }}
-                style={{
-                  paddingHorizontal: space.md,
-                  paddingVertical: space.xs,
-                  borderRadius: layout.radius.full,
-                  backgroundColor: region === r ? colors.ink : 'transparent',
-                  borderWidth: 1,
-                  borderColor: region === r ? colors.ink : colors.hairline,
-                }}
-              >
-                <Text
-                  variant="caption"
-                  color={region === r ? '#FFFFFF' : colors.ink}
-                  style={{ fontWeight: '600', letterSpacing: 0.3, fontSize: 12 }}
-                >
-                  {r}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      </Rise>
-
-      <Rise delay={120}>
-        <View style={{ alignItems: 'center', gap: space.md }}>
-          <View
-            style={{
-              width: cardWidth,
-              position: 'relative',
-              alignItems: 'center',
-            }}
-          >
-            {/* Background peek card (next character) */}
-            {filtered[index + 1] && (
-              <View
-                style={{
-                  position: 'absolute',
-                  top: -10,
-                  width: cardWidth - 24,
-                  height: cardWidth * 1.55,
-                  backgroundColor: colors.accent,
-                  opacity: 0.85,
-                  borderRadius: layout.radius.sheet,
-                  zIndex: 0,
-                }}
-              />
-            )}
-            {current && (
-              <MotiView
-                key={current.id}
-                from={{ opacity: 0, translateY: 12 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{ type: 'timing', duration: motion.duration.medium, easing: Easing.out(Easing.quad) }}
-                style={{ width: cardWidth, zIndex: 1 }}
-              >
-                <CompanionCard
-                  c={current}
-                  primary
-                  onChoose={() => choose(current)}
-                />
-              </MotiView>
-            )}
-          </View>
-
-          {/* Pagination dots + prev/next */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-            <Pressable
-              accessibilityLabel="Previous companion"
-              disabled={index === 0}
-              onPress={() => setIndex((i) => Math.max(0, i - 1))}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: layout.radius.full,
-                backgroundColor: colors.card,
-                borderColor: colors.hairline,
-                borderWidth: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: index === 0 ? 0.4 : 1,
-              }}
-            >
-              <ArrowLeft size={16} color={colors.ink} strokeWidth={1.75} />
-            </Pressable>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {filtered.map((c, i) => (
-                <View
-                  key={c.id}
-                  style={{
-                    width: i === index ? 18 : 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: i === index ? colors.ink : colors.hairline,
-                  }}
-                />
-              ))}
-            </View>
-            <Pressable
-              accessibilityLabel="Next companion"
-              disabled={index >= filtered.length - 1}
-              onPress={() => setIndex((i) => Math.min(filtered.length - 1, i + 1))}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: layout.radius.full,
-                backgroundColor: colors.ink,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: index >= filtered.length - 1 ? 0.4 : 1,
-              }}
-            >
-              <ArrowLeft
-                size={16}
-                color="#FFFFFF"
-                strokeWidth={1.75}
-                style={{ transform: [{ rotate: '180deg' }] }}
-              />
-            </Pressable>
-          </View>
-        </View>
-      </Rise>
-
-      <Rise delay={180}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Upload your own image"
-          onPress={() => {
-            /* TODO wire to image picker → cartoon-conversion pipeline */
-          }}
+      {/* Micro title — one line, no preachy subtext. The cards are the page. */}
+      <View style={{ marginTop: space.md, gap: 2 }}>
+        <Text variant="caption" soft style={{ letterSpacing: 0.6, fontWeight: '600', fontSize: 11 }}>
+          STEP 3 OF 3
+        </Text>
+        <Text
           style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: space.sm,
-            padding: space.md,
-            borderRadius: layout.radius.card,
-            backgroundColor: colors.card,
-            borderColor: colors.hairline,
-            borderWidth: 1,
-            borderStyle: 'dashed',
+            fontFamily: 'InstrumentSerif_400Regular',
+            fontSize: 32,
+            lineHeight: 36,
+            color: colors.ink,
+            letterSpacing: -0.6,
           }}
         >
-          <View
+          Pick your{' '}
+          <Text
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: layout.radius.full,
-              backgroundColor: colors.canvas,
-              alignItems: 'center',
-              justifyContent: 'center',
+              fontFamily: 'InstrumentSerif_400Regular_Italic',
+              color: colors.accent,
+              fontSize: 32,
             }}
           >
-            <ImagePlus size={18} color={colors.ink} strokeWidth={1.75} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text variant="body" style={{ fontWeight: '600' }}>
-              Upload your own
+            companion.
+          </Text>
+        </Text>
+      </View>
+
+      {/* Card stack — fills remaining vertical space. Absolute children so
+          they overlap; outer relative wrapper sets the actual size. */}
+      <View
+        style={{
+          flex: 1,
+          marginTop: space.md,
+          marginBottom: space.md,
+          position: 'relative',
+        }}
+      >
+        <PeekCard c={peek2} depth={2} />
+        <PeekCard c={peek1} depth={1} />
+        <TopCard
+          // Re-mount the top card every time idx changes so each new card
+          // starts with translateX/Y back at 0 with no animation seam.
+          key={current.id + idx}
+          c={current}
+          onAccept={() => accept(current)}
+          onSkip={skip}
+        />
+      </View>
+
+      {/* Dots + CTA below the stack — no scroll required. */}
+      <View style={{ gap: space.md }}>
+        <Dots count={total} current={idx % total} />
+
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
+          {/* Manual skip button — covers users who don't realize they
+              can swipe. Same as drag-left. */}
+          <Pressable
+            onPress={skip}
+            accessibilityRole="button"
+            accessibilityLabel={`Skip ${current.name}`}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: colors.card,
+              borderColor: colors.hairline,
+              borderWidth: 1.25,
+              alignItems: 'center',
+              justifyContent: 'center',
+              ...shadow.rest,
+            }}
+          >
+            <X size={22} color={colors.inkSoft} strokeWidth={2.25} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => accept(current)}
+            accessibilityRole="button"
+            accessibilityLabel={`Choose ${current.name}`}
+            style={{
+              flex: 1,
+              minHeight: 56,
+              borderRadius: 28,
+              backgroundColor: colors.accent,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              ...shadow.raised,
+            }}
+          >
+            <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+            <Text variant="button" color="#FFFFFF">
+              Choose {current.name}
             </Text>
-            <Text variant="caption" soft>
-              We'll cartoon-ify it, matched to the cast style.
-            </Text>
-          </View>
-        </Pressable>
-      </Rise>
-    </Screen>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 

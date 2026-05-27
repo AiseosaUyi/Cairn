@@ -98,42 +98,60 @@ export function usePWAState(): PWAState {
 }
 
 // ---------------------------------------------------------------------------
-// Dismiss persistence — banner dismisses per-session (sessionStorage),
-// modal dismisses persistently (localStorage). Tradeoff: banner stays
-// gentle (returns next visit); modal is once-and-done.
+// Dismiss persistence.
+//
+// Banner: 24-hour cooldown in localStorage. Was sessionStorage forever-
+// for-this-tab, which meant a single tap on × hid the banner indefinitely
+// until the user closed the tab — surfaced as "the install banner doesn't
+// come back" in founder testing. 24h is the standard nag-without-being-
+// annoying interval; after the cooldown the banner reappears so the user
+// gets another chance to install.
+//
+// Modal: persistent (localStorage forever). Modal is more intrusive than
+// the banner so once-and-done.
 // ---------------------------------------------------------------------------
+
+const BANNER_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export function useDismissed(key: 'banner' | 'modal') {
   const storeKey = key === 'banner' ? BANNER_DISMISS_KEY : MODAL_DISMISS_KEY;
   const store = (): Storage | null => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
     try {
-      return key === 'banner' ? window.sessionStorage : window.localStorage;
+      return window.localStorage;
     } catch {
       return null;
     }
   };
 
-  const [dismissed, setDismissed] = useState<boolean>(() => {
+  const isStillDismissed = useCallback((): boolean => {
     const s = store();
     if (!s) return false;
     try {
-      return s.getItem(storeKey) === '1';
+      const raw = s.getItem(storeKey);
+      if (!raw) return false;
+      if (key === 'modal') return raw === '1' || !!raw;
+      // Banner: stored value is an ISO timestamp; expire after cooldown.
+      const dismissedAt = new Date(raw).getTime();
+      if (Number.isNaN(dismissedAt)) return false;
+      return Date.now() - dismissedAt < BANNER_COOLDOWN_MS;
     } catch {
       return false;
     }
-  });
+  }, [key, storeKey]);
+
+  const [dismissed, setDismissed] = useState<boolean>(() => isStillDismissed());
 
   const dismiss = useCallback(() => {
     setDismissed(true);
     const s = store();
     if (!s) return;
     try {
-      s.setItem(storeKey, '1');
+      s.setItem(storeKey, key === 'banner' ? new Date().toISOString() : '1');
     } catch {
       /* ignore */
     }
-  }, [storeKey]);
+  }, [key, storeKey]);
 
   return { dismissed, dismiss };
 }

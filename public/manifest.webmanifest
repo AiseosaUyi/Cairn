@@ -1,14 +1,18 @@
 {
+  "id": "/",
   "name": "Cairn — AI Career Companion",
   "short_name": "Cairn",
   "description": "Your AI career companion. Pick a specialist, state your goal, walk a step-by-step path. Built for the move you're actually trying to make.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#F8F7F4",
   "theme_color": "#A24F33",
   "lang": "en",
+  "dir": "ltr",
+  "prefer_related_applications": false,
   "categories": ["productivity", "lifestyle", "business"],
   "icons": [
     {

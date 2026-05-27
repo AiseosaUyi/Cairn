@@ -12,6 +12,7 @@ import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { Pressable, Text as RNText, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import {
   Inter_400Regular,
@@ -46,7 +47,10 @@ export default function RootLayout() {
   if (!loaded && !error) return null;
 
   return (
-    <>
+    // GestureHandlerRootView is required for react-native-gesture-handler
+    // v2 pan/swipe gestures (companion-picker swipe stack) to receive
+    // events. Must wrap the entire app tree.
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
       {/* PWA install affordances — both components self-gate (web only,
@@ -54,7 +58,7 @@ export default function RootLayout() {
           mounting them globally is safe. */}
       <InstallBanner />
       <InstallModal />
-    </>
+    </GestureHandlerRootView>
   );
 }
 

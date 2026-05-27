@@ -315,6 +315,16 @@ export function InstallBannerInner() {
   if (isStandalone) return null;
   if (device === 'desktop' || device === 'native') return null;
   if (dismissed) return null;
+  // Android: only surface the banner when Chrome is actually ready to
+  // fire the native install dialog (`beforeinstallprompt` captured).
+  // Founder feedback was that tapping install when Chrome wasn't ready
+  // showed a manual walkthrough — "browser shortcut" energy — when they
+  // wanted the real OS install prompt (like FounderOS / other PWAs do).
+  // Hiding the banner until canPromptInstall=true guarantees that EVERY
+  // tap on Install lands in the native OS dialog. The banner appears
+  // automatically when Chrome's engagement heuristic fires the event
+  // (typically after a few seconds of page interaction).
+  if (device === 'mobile-android' && !canPromptInstall) return null;
 
   const onInstallTap = async () => {
     if (canPromptInstall) {
@@ -322,6 +332,9 @@ export function InstallBannerInner() {
       if (outcome === 'accepted' || outcome === 'dismissed') dismiss();
       return;
     }
+    // iOS only path — Apple doesn't support programmatic install, so
+    // the Share-menu walkthrough is the only option. Android never
+    // reaches this branch (gated above).
     setShowInstructions(true);
   };
 
