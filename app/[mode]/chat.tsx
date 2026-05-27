@@ -472,6 +472,7 @@ function Composer({
 }) {
   const { colors } = useTheme();
   const hasText = value.trim().length > 0;
+  const [focused, setFocused] = useState(false);
   return (
     <View
       style={{
@@ -479,7 +480,9 @@ function Composer({
         alignItems: 'flex-end',
         gap: space.xs,
         backgroundColor: colors.card,
-        borderColor: colors.hairline,
+        // Drop the hairline when the composer is focused — the surface
+        // already lifts on shadow, and the extra border felt boxed-in.
+        borderColor: focused ? 'transparent' : colors.hairline,
         borderWidth: 1,
         borderRadius: 24,
         paddingHorizontal: space.sm,
@@ -491,6 +494,8 @@ function Composer({
       <TextInput
         value={value}
         onChangeText={onChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         placeholder={placeholder}
         placeholderTextColor={colors.inkSoft}
         accessibilityLabel="Message your companion"

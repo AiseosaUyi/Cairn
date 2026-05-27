@@ -1,8 +1,18 @@
 /**
  * /api/transcribe — Whisper proxy as a Vercel Serverless Function.
  *
- * Receives multipart/form-data with the audio Blob in `file`,
- * forwards to OpenAI's transcription endpoint, returns { text, ok }.
+ * Why this just forwards raw bytes instead of parsing the multipart:
+ * `Request.formData()` on Vercel's Node runtime is unreliable for
+ * `multipart/form-data` — different runtime/undici versions either fail
+ * to parse the boundary, mangle Blob filenames, or throw outright on
+ * larger payloads. Symptom is an opaque HTTP 500 in the client.
+ *
+ * Solution: don't parse. The client already builds the FormData with
+ * `file`, `model`, and `response_format` fields, so we read the body
+ * as bytes, copy the original Content-Type (which carries the boundary
+ * string Whisper needs), and stream it straight to OpenAI. Zero
+ * multipart code on our side.
+ *
  * Key stays server-side (process.env.OPENAI_API_KEY).
  */
 
@@ -21,45 +31,49 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  let inbound: FormData;
-  try {
-    inbound = await request.formData();
-  } catch {
+  const contentType = request.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('multipart/form-data')) {
     return Response.json(
-      { ok: false, error: 'Expected multipart/form-data with a `file` field' },
+      { ok: false, error: `Expected multipart/form-data, got: ${contentType || 'none'}` },
       { status: 400 },
     );
   }
 
-  const file = inbound.get('file');
-  if (!file || !(file instanceof Blob)) {
-    return Response.json({ ok: false, error: 'Missing file' }, { status: 400 });
+  let body: ArrayBuffer;
+  try {
+    body = await request.arrayBuffer();
+  } catch (e) {
+    return Response.json(
+      { ok: false, error: `Failed to read request body: ${e instanceof Error ? e.message : String(e)}` },
+      { status: 400 },
+    );
   }
 
-  const ext = file.type.includes('webm') ? 'webm'
-    : file.type.includes('ogg') ? 'ogg'
-    : file.type.includes('mp4') ? 'm4a'
-    : file.type.includes('wav') ? 'wav'
-    : 'webm';
-
-  const out = new FormData();
-  out.append('file', file, `voice.${ext}`);
-  out.append('model', 'whisper-1');
-  out.append('response_format', 'json');
+  if (body.byteLength === 0) {
+    return Response.json({ ok: false, error: 'Empty request body' }, { status: 400 });
+  }
 
   try {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: out,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        // Forward the original multipart Content-Type unchanged so the
+        // boundary string travels with the body. Don't add charset or
+        // any other parameter — Whisper validates this strictly.
+        'Content-Type': contentType,
+      },
+      body,
     });
+
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       return Response.json(
-        { ok: false, error: `Whisper ${res.status}: ${errText.slice(0, 240)}` },
+        { ok: false, error: `Whisper ${res.status}: ${errText.slice(0, 280)}` },
         { status: res.status },
       );
     }
+
     const json = (await res.json()) as { text?: string };
     return Response.json({ ok: true, text: (json.text ?? '').trim() });
   } catch (e) {

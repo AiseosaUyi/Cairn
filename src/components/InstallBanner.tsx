@@ -7,14 +7,17 @@
  *   - User hasn't dismissed for this session
  *
  * Behavior splits by platform:
- *   - Android / Chrome / Edge: fires the captured `beforeinstallprompt`
- *     for a native OS install dialog (one tap).
- *   - iOS Safari: no native install event exists. We show the
- *     instruction overlay ("Tap Share → Add to Home Screen") with a
- *     small icon walkthrough.
+ *   - Android / Chrome / Edge with prompt available: fires the captured
+ *     `beforeinstallprompt` for the native OS install dialog. One tap.
+ *   - Android without the prompt yet: Chrome hasn't decided the user is
+ *     "engaged" enough — show a soft "give it a moment" hint plus the
+ *     ⋮ menu → Install app manual path. Never show iOS Share-menu
+ *     instructions (Android Chrome's Share menu doesn't install PWAs).
+ *   - iOS Safari: no programmatic install path exists (Apple policy).
+ *     Show the Share → Add to Home Screen walkthrough.
  *
- * Closes via the small × on the right (sessionStorage dismiss — banner
- * returns next visit, not nagging within the same session).
+ * Closes via the small × (sessionStorage dismiss — banner returns next
+ * visit, doesn't nag within the same session).
  */
 import { Platform, Pressable, View } from 'react-native';
 import { useState } from 'react';
@@ -26,14 +29,6 @@ import { Text } from '@/design/Text';
 import { layout, motion, shadow, space } from '@/design/tokens';
 import { usePWAState, useDismissed } from '@/pwa/install';
 
-/**
- * Fallback instructions — only opens when the browser can't install
- * programmatically (no `beforeinstallprompt`). Full-screen modal so the
- * Share/menu icon can render BIG as the visual answer to "what share
- * button?" — naming alone is ambiguous across browsers, but the icon
- * shape (square with up-arrow on iOS, three-dot menu on others) is
- * universal. Browser-agnostic copy.
- */
 function InstallInstructions({
   device,
   onClose,
@@ -42,18 +37,7 @@ function InstallInstructions({
   onClose: () => void;
 }) {
   const { colors } = useTheme();
-  // iOS-WebKit family → Share menu pattern (the actual Share button is a
-  // square with an up-arrow, lives in the browser toolbar). Everything
-  // else → browser overflow menu (the three-dot icon).
   const isIOS = device === 'mobile-ios';
-  const HintIcon = isIOS ? Share : MoreVertical;
-  const buttonName = isIOS ? 'Share' : 'menu';
-  const hint = isIOS
-    ? 'Look for it in your browser toolbar — it usually sits at the bottom on phones, top on tablets and desktop.'
-    : 'It looks like three dots and lives at the top-right (or bottom) of your browser.';
-  const step2 = isIOS
-    ? 'Choose "Add to Home Screen"'
-    : 'Choose "Install app" (or "Add to Home Screen")';
 
   return (
     <View
@@ -92,7 +76,7 @@ function InstallInstructions({
           }}
         >
           <Text variant="caption" soft style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11 }}>
-            INSTALL TRUESELF
+            INSTALL CAIRN
           </Text>
           <Pressable
             onPress={onClose}
@@ -113,117 +97,189 @@ function InstallInstructions({
           </Pressable>
         </View>
 
-        <Text
-          style={{
-            fontFamily: 'InstrumentSerif_400Regular',
-            fontSize: 36,
-            color: colors.ink,
-            letterSpacing: -0.6,
-            lineHeight: 40,
-          }}
-        >
-          Two taps,{' '}
-          <Text
-            style={{
-              fontFamily: 'InstrumentSerif_400Regular_Italic',
-              color: colors.accent,
-              fontSize: 36,
-              letterSpacing: -0.6,
-            }}
-          >
-            and you're in.
-          </Text>
-        </Text>
+        {isIOS ? (
+          <>
+            <View style={{ gap: 6 }}>
+              <Text
+                style={{
+                  fontFamily: 'InstrumentSerif_400Regular',
+                  fontSize: 36,
+                  color: colors.ink,
+                  letterSpacing: -0.6,
+                  lineHeight: 40,
+                }}
+              >
+                A real app,{' '}
+                <Text
+                  style={{
+                    fontFamily: 'InstrumentSerif_400Regular_Italic',
+                    color: colors.accent,
+                    fontSize: 36,
+                    letterSpacing: -0.6,
+                  }}
+                >
+                  in two taps.
+                </Text>
+              </Text>
+              <Text variant="body" soft style={{ marginTop: 4, lineHeight: 22 }}>
+                What you'll get isn't a browser bookmark — it's Cairn on
+                your home screen as a full-screen app icon. No tabs, no
+                Safari chrome. Apple makes us route through their Share
+                menu for this, but the result is the real thing.
+              </Text>
+            </View>
 
-        {/* Step 1 — big icon hero so "what share button" is answered by the icon */}
-        <View style={{ gap: space.sm, marginTop: space.sm }}>
-          <View style={{ flexDirection: 'row', gap: space.xs, alignItems: 'baseline' }}>
-            <Text
-              style={{
-                fontFamily: 'InstrumentSerif_400Regular',
-                fontSize: 28,
-                color: colors.accent,
-                letterSpacing: -0.3,
-              }}
-            >
-              1
-            </Text>
-            <Text
-              variant="body"
-              style={{ fontWeight: '600', fontSize: 17, flex: 1 }}
-            >
-              Tap the {buttonName} button in your browser
-            </Text>
-          </View>
-          <View
-            style={{
-              padding: space.lg,
-              backgroundColor: colors.canvas,
-              borderColor: colors.hairline,
-              borderWidth: 1,
-              borderRadius: layout.radius.card,
-              alignItems: 'center',
-              gap: space.xs,
-            }}
-          >
+            <View style={{ gap: space.sm, marginTop: space.xs }}>
+              <View style={{ flexDirection: 'row', gap: space.xs, alignItems: 'baseline' }}>
+                <Text
+                  style={{
+                    fontFamily: 'InstrumentSerif_400Regular',
+                    fontSize: 28,
+                    color: colors.accent,
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  1
+                </Text>
+                <Text variant="body" style={{ fontWeight: '600', fontSize: 17, flex: 1 }}>
+                  Tap the Share button at the bottom of Safari
+                </Text>
+              </View>
+              <View
+                style={{
+                  padding: space.lg,
+                  backgroundColor: colors.canvas,
+                  borderColor: colors.hairline,
+                  borderWidth: 1,
+                  borderRadius: layout.radius.card,
+                  alignItems: 'center',
+                  gap: space.xs,
+                }}
+              >
+                <View
+                  style={{
+                    width: 88,
+                    height: 88,
+                    borderRadius: layout.radius.card,
+                    backgroundColor: colors.card,
+                    borderColor: colors.hairline,
+                    borderWidth: 1.5,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Share size={42} color={colors.ink} strokeWidth={1.5} />
+                </View>
+                <Text variant="caption" style={{ fontWeight: '600', fontSize: 12 }}>
+                  Looks like this — square with an up-arrow
+                </Text>
+              </View>
+            </View>
+
             <View
               style={{
-                width: 88,
-                height: 88,
-                borderRadius: layout.radius.card,
-                backgroundColor: colors.card,
-                borderColor: colors.hairline,
-                borderWidth: 1.5,
+                flexDirection: 'row',
+                gap: space.sm,
                 alignItems: 'center',
-                justifyContent: 'center',
+                paddingVertical: space.md,
+                paddingHorizontal: space.md,
+                backgroundColor: colors.canvas,
+                borderColor: colors.hairline,
+                borderWidth: 1,
+                borderRadius: layout.radius.card,
               }}
             >
-              <HintIcon size={42} color={colors.ink} strokeWidth={1.5} />
+              <Text
+                style={{
+                  fontFamily: 'InstrumentSerif_400Regular',
+                  fontSize: 28,
+                  color: colors.accent,
+                  letterSpacing: -0.3,
+                }}
+              >
+                2
+              </Text>
+              <ArrowDown size={20} color={colors.ink} strokeWidth={1.75} />
+              <Text variant="body" style={{ fontWeight: '600', fontSize: 17, flex: 1 }}>
+                Scroll down → "Add to Home Screen"
+              </Text>
             </View>
+          </>
+        ) : (
+          // Android fallback — Chrome's beforeinstallprompt either hasn't
+          // fired yet (engagement gate) or the user is in an embedded
+          // webview. Show the manual ⋮-menu path.
+          <>
+            <View style={{ gap: 6 }}>
+              <Text
+                style={{
+                  fontFamily: 'InstrumentSerif_400Regular',
+                  fontSize: 36,
+                  color: colors.ink,
+                  letterSpacing: -0.6,
+                  lineHeight: 40,
+                }}
+              >
+                Almost — give Chrome{' '}
+                <Text
+                  style={{
+                    fontFamily: 'InstrumentSerif_400Regular_Italic',
+                    color: colors.accent,
+                    fontSize: 36,
+                    letterSpacing: -0.6,
+                  }}
+                >
+                  a moment.
+                </Text>
+              </Text>
+              <Text variant="body" soft style={{ marginTop: 4, lineHeight: 22 }}>
+                Chrome waits for you to interact with the page for a few
+                seconds before it lets sites trigger install. Browse
+                Cairn briefly, then tap Install again — the native
+                install dialog will pop up.
+              </Text>
+            </View>
+
             <Text
               variant="caption"
-              style={{ fontWeight: '600', letterSpacing: 0.2, fontSize: 12 }}
+              soft
+              style={{ letterSpacing: 0.5, fontWeight: '600', fontSize: 11, marginTop: space.sm }}
             >
-              Looks like this →
+              OR INSTALL MANUALLY
             </Text>
-            <Text variant="caption" soft style={{ textAlign: 'center', fontSize: 12, lineHeight: 18, maxWidth: 320 }}>
-              {hint}
-            </Text>
-          </View>
-        </View>
-
-        {/* Step 2 */}
-        <View
-          style={{
-            flexDirection: 'row',
-            gap: space.sm,
-            alignItems: 'center',
-            paddingVertical: space.md,
-            paddingHorizontal: space.md,
-            backgroundColor: colors.canvas,
-            borderColor: colors.hairline,
-            borderWidth: 1,
-            borderRadius: layout.radius.card,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: 'InstrumentSerif_400Regular',
-              fontSize: 28,
-              color: colors.accent,
-              letterSpacing: -0.3,
-            }}
-          >
-            2
-          </Text>
-          <ArrowDown size={20} color={colors.ink} strokeWidth={1.75} />
-          <Text
-            variant="body"
-            style={{ fontWeight: '600', fontSize: 17, flex: 1 }}
-          >
-            {step2}
-          </Text>
-        </View>
+            <View
+              style={{
+                padding: space.md,
+                backgroundColor: colors.canvas,
+                borderColor: colors.hairline,
+                borderWidth: 1,
+                borderRadius: layout.radius.card,
+                flexDirection: 'row',
+                gap: space.sm,
+                alignItems: 'center',
+              }}
+            >
+              <View
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: layout.radius.card,
+                  backgroundColor: colors.card,
+                  borderColor: colors.hairline,
+                  borderWidth: 1.5,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <MoreVertical size={28} color={colors.ink} strokeWidth={1.75} />
+              </View>
+              <Text variant="body" style={{ flex: 1, lineHeight: 22 }}>
+                Tap Chrome's <Text style={{ fontWeight: '700' }}>⋮ menu</Text> (top-right) →{' '}
+                <Text style={{ fontWeight: '700' }}>Install app</Text>
+              </Text>
+            </View>
+          </>
+        )}
 
         <View style={{ flex: 1 }} />
 
@@ -244,9 +300,6 @@ function InstallInstructions({
             Got it
           </Text>
         </Pressable>
-        <Text variant="caption" soft style={{ textAlign: 'center', fontSize: 12 }}>
-          Cairn opens like a native app — full-screen, no browser chrome.
-        </Text>
       </MotiView>
     </View>
   );
@@ -258,16 +311,11 @@ export function InstallBannerInner() {
   const { dismissed, dismiss } = useDismissed('banner');
   const [showInstructions, setShowInstructions] = useState(false);
 
-  // Native binary + already installed → render nothing.
   if (Platform.OS !== 'web') return null;
   if (isStandalone) return null;
   if (device === 'desktop' || device === 'native') return null;
   if (dismissed) return null;
 
-  // Single "Install" path: try the OS dialog first, fall through to
-  // instructions only when the browser can't install programmatically.
-  // This is the right UX regardless of browser/OS — the user shouldn't
-  // need to know what their browser supports.
   const onInstallTap = async () => {
     if (canPromptInstall) {
       const outcome = await promptInstall();
@@ -276,6 +324,13 @@ export function InstallBannerInner() {
     }
     setShowInstructions(true);
   };
+
+  const subtitle =
+    device === 'mobile-ios'
+      ? 'A real app on your home screen'
+      : canPromptInstall
+        ? 'One tap, full-screen, works offline'
+        : 'Full-screen, works offline';
 
   return (
     <>
@@ -287,7 +342,7 @@ export function InstallBannerInner() {
           position: 'absolute' as any,
           left: space.md,
           right: space.md,
-          bottom: space.md + 56, // sit above the slim floating tab bar in-app
+          bottom: space.md + 56,
           zIndex: 50,
           backgroundColor: colors.ink,
           borderRadius: layout.radius.card,
@@ -317,7 +372,7 @@ export function InstallBannerInner() {
             Install Cairn
           </Text>
           <Text variant="caption" color="rgba(255,255,255,0.65)" style={{ fontSize: 12 }}>
-            Faster, full-screen, works offline.
+            {subtitle}
           </Text>
         </View>
         <Pressable
@@ -361,8 +416,6 @@ export function InstallBannerInner() {
   );
 }
 
-/** Wraps in a theme provider so the banner can render at the root layout
- *  level (outside any ThemeProvider scope from a mode shell). */
 export function InstallBanner() {
   return (
     <ThemeProvider mode="career">

@@ -23,14 +23,19 @@ function apiBase(): string {
 
 export async function transcribe(audio: Blob): Promise<TranscribeResult> {
   const fd = new FormData();
-  // The proxy doesn't actually need a filename — it renames before
-  // forwarding — but giving one keeps the field happy in all envs.
+  // Filename is required by Whisper for content-type sniffing; extension
+  // must match the audio mime or Whisper rejects with "Invalid file
+  // format". Browser-recorded webm/opus is the common case.
   const ext = audio.type.includes('webm') ? 'webm'
     : audio.type.includes('ogg') ? 'ogg'
     : audio.type.includes('mp4') ? 'm4a'
     : audio.type.includes('wav') ? 'wav'
     : 'webm';
+  // The proxy forwards this multipart unchanged, so all Whisper-required
+  // fields have to be set here on the client.
   fd.append('file', audio, `voice.${ext}`);
+  fd.append('model', 'whisper-1');
+  fd.append('response_format', 'json');
 
   try {
     const res = await fetch(`${apiBase()}/api/transcribe`, {
